@@ -1,8 +1,8 @@
-# NextUpVoice 进展
+# NexVoice 进展
 
 ## 当前状态
 
-- 已创建独立项目目录：`/Users/nefish/Desktop/WorkSpace/Coding/NextUpVoice`。
+- 已创建独立项目目录：`/Users/nefish/Desktop/WorkSpace/Coding/NexVoice`。
 - 已初始化为本地 Git 仓库。
 - 已放入第一阶段调研文档和 Typeless 调研报告。
 - 尚未导入 NexHub/NextUp 代码。
@@ -13,9 +13,10 @@
 ### 2026-06-18
 
 - 建立项目仓库骨架。
+- 项目命名调整为 `NexVoice`。
 - 写入 `README.md`。
 - 写入第一阶段调研文档：
-  - `docs/nextup_voice_phase1_plan.md`
+  - `docs/nexvoice_phase1_plan.md`
   - `docs/typeless_research_report.md`
 
 ## 下一步
