@@ -1,0 +1,11 @@
+.DS_Store
+.build/
+DerivedData/
+dist/
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+.env
+.env.local
+.release.local.env
+*.log
