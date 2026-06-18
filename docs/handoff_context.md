@@ -11,6 +11,8 @@
 
 用户不想完整复刻 Typeless 的所有功能，而是希望先做一个更聚焦、能个人落地的 Mac 工具，产品命名为 **NexVoice**。
 
+> 2026-06-18 更新：本文件保留早期目标背景；ASR 主链路已经按用户最新决策改为速度优先，当前默认接入腾讯云实时语音识别大模型。SenseVoice Small via sherpa-onnx 和 WhisperKit large-v3 保留为本地兜底和质量对照。
+
 ## 2. 项目目标
 
 NexVoice 第一版只做两个核心功能：
@@ -32,11 +34,11 @@ NexVoice 第一版只做两个核心功能：
 - 不建议从零开始新建 macOS App。
 - 建议复用 NexHub/NextUp 的 Swift 应用底座。
 - 第一版不要做完整 Typeless，只做“转写 + 同传”。
-- 实时链路优先用云端服务，端侧模型先预留接口。
+- ASR 主链路已改为腾讯云实时大模型，优先保证低延迟；端侧模型后置为离线兜底和质量对照方案。
 - 最终润色优先用低成本文本模型。
 - 产品体验要明确分为两个阶段：
-  - 实时草稿：边说边出。
-  - 最终稿：说完后整体润色/改写。
+  - 实时状态：只显示轻量波形反馈，不把草稿文字当结果容器。
+  - 最终稿：说完后输出到当前聚焦输入框，并在需要时整体润色/改写。
 
 ## 4. 推荐技术路线
 
@@ -64,7 +66,9 @@ NexVoice 第一版只做两个核心功能：
 
 ### 4.2 模型与服务商
 
-推荐第一版优先验证：
+当前实现已改为腾讯云实时语音识别大模型作为默认 ASR；本地 SenseVoice Small via sherpa-onnx 保留为离线兜底和质量对照。
+
+早期曾建议第一版优先验证：
 
 - 实时转写：腾讯云实时 ASR 大模型版，或阿里 `qwen3-asr-flash-realtime`。
 - 实时同传：腾讯云大模型实时语音翻译。
@@ -77,7 +81,7 @@ NexVoice 第一版只做两个核心功能：
 - 火山引擎 / 豆包语音和文本模型。
 - OpenAI Realtime 作为开发速度优先或国外链路验证方案。
 
-端侧模型暂不进入第一版主链路，只预留接口。后续可探索 whisper.cpp、Moonshine、SenseVoice、MLX、Ollama、llama.cpp。
+端侧模型当前作为本地兜底和质量对照保留；后续可继续探索 whisper.cpp、Moonshine、SenseVoice、MLX、Ollama、llama.cpp。
 
 ## 5. 预留端口
 
@@ -90,17 +94,22 @@ NexVoice 第一版只做两个核心功能：
 
 ## 6. 当前仓库状态
 
-当前仓库已经初始化 Git，但还没有放入 Swift 应用代码。
+当前仓库已经初始化 Git，并已放入 SwiftPM macOS 菜单栏应用代码。
 
-已有文件：
+已有重点文件：
 
 - `README.md`
 - `AGENT_PROGRESS.md`
 - `docs/handoff_context.md`
 - `docs/nexvoice_phase1_plan.md`
 - `docs/typeless_research_report.md`
+- `Sources/NexVoiceCore`
+- `Sources/NexVoiceHost`
+- `Tests/NexVoiceCoreTests`
+- `scripts/build_app.sh`
+- `scripts/configure_tencent_asr.sh`
 
-已有 Git 提交：
+早期已有 Git 提交：
 
 - `540f6b1 Initial NextUpVoice research docs`
 - `8c7106f Rename project to NexVoice`
