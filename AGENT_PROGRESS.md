@@ -5,6 +5,7 @@
 - 已创建独立项目目录：`/Users/nefish/Desktop/WorkSpace/Coding/NexVoice`。
 - 已初始化为本地 Git 仓库。
 - 已放入第一阶段调研文档和 Typeless 调研报告。
+- 已补充下一轮对话可直接使用的背景与目标交接说明。
 - 尚未导入 NexHub/NextUp 代码。
 - 尚未开始 Swift 应用实现。
 
@@ -16,6 +17,7 @@
 - 项目命名调整为 `NexVoice`。
 - 写入 `README.md`。
 - 写入第一阶段调研文档：
+  - `docs/handoff_context.md`
   - `docs/nexvoice_phase1_plan.md`
   - `docs/typeless_research_report.md`
 
