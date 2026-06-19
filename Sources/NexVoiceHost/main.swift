@@ -8,29 +8,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var shortcutMenuItem: NSMenuItem?
     private var shortcutSettingsMenuItem: NSMenuItem?
     private var asrMenuItem: NSMenuItem?
-    private var chineseMenuItem: NSMenuItem?
-    private var englishMenuItem: NSMenuItem?
+    private var chineseOutputMenuItem: NSMenuItem?
+    private var englishOutputMenuItem: NSMenuItem?
+    private var outputStyleMenuItem: NSMenuItem?
+    private var outputStyleMenuItems: [VoiceRewriteStyle: NSMenuItem] = [:]
+    private var rewriteEvaluationMenuItem: NSMenuItem?
     private var accessibilityMenuItem: NSMenuItem?
     private let permissionService = MicrophonePermissionService()
     private let transcriptionService = TencentCloudRealtimeTranscriptionService()
+    private let finalRewriteService = DeepSeekFinalRewriteService()
     private let captionPanel = VoiceCaptionPanelController()
     private let textInserter = FocusedTextInserter()
     private let shortcutStore = VoiceShortcutStore()
     private let shortcutMonitor = GlobalVoiceShortcutMonitor()
     private var shortcutSettingsWindowController: VoiceShortcutSettingsWindowController?
-    private var selectedLanguage = SpeechRecognitionLanguage.simplifiedChinese
+    private var selectedOutputLanguage = VoiceOutputLanguage.simplifiedChinese
+    private var selectedRewriteStyle = VoiceRewriteStyle.default
     private var voiceShortcut: VoiceShortcut = .default
     private var targetApplicationForCurrentSession: NSRunningApplication?
+    private var selectedTextContextForCurrentSession: SelectedTextContext?
+    private var rewriteContextForCurrentSession: VoiceRewriteContext?
     private var didInsertCurrentSession = false
+    private var isCurrentSessionCancelled = false
     private var insertedTextPreview: String?
+    private var isRewritingCurrentSession = false
+    private var beginSessionTask: Task<Void, Never>?
+    private var rewriteTask: Task<Void, Never>?
     private var permissionRefreshWorkItem: DispatchWorkItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if shouldRunRewriteEvaluationOnly {
+            NSApp.setActivationPolicy(.accessory)
+            Task {
+                let reportURL = await VoiceRewriteEvaluationRunner.runAndWriteReport()
+                print("NexVoice rewrite evaluation report: \(reportURL.path)")
+                NSApp.terminate(nil)
+            }
+            return
+        }
+
         NSApp.setActivationPolicy(.accessory)
         voiceShortcut = shortcutStore.load()
         configureStatusItem()
-        captionPanel.reset(language: selectedLanguage, shortcut: voiceShortcut)
+        captionPanel.reset()
         startShortcutMonitor()
+    }
+
+    private var shouldRunRewriteEvaluationOnly: Bool {
+        Bundle.main.bundleIdentifier == "com.nexvoice.mac.rewrite-eval-runner"
+            || ProcessInfo.processInfo.arguments.contains("--run-rewrite-eval")
     }
 
     private func configureStatusItem() {
@@ -40,20 +66,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         let shortcutItem = NSMenuItem(title: "快捷键：\(voiceShortcut.displayTitle)", action: nil, keyEquivalent: "")
         let settingsItem = NSMenuItem(title: "设置快捷键...", action: #selector(openShortcutSettings), keyEquivalent: "")
-        let chineseItem = NSMenuItem(title: "语言：中文", action: #selector(selectChinese), keyEquivalent: "")
-        let englishItem = NSMenuItem(title: "语言：English", action: #selector(selectEnglish), keyEquivalent: "")
+        let chineseOutputItem = NSMenuItem(title: "输出：中文", action: #selector(selectChineseOutput), keyEquivalent: "")
+        let englishOutputItem = NSMenuItem(title: "输出：English", action: #selector(selectEnglishOutput), keyEquivalent: "")
+        let outputStyleItem = NSMenuItem(title: "输出模式：\(selectedRewriteStyle.menuTitle)", action: nil, keyEquivalent: "")
+        let rewriteEvaluationItem = NSMenuItem(title: "运行 DeepSeek 评测", action: #selector(runRewriteEvaluation), keyEquivalent: "")
         let accessibilityItem = NSMenuItem(title: VoicePermissionGuidance.accessibility.actionTitle, action: #selector(openAccessibilitySettings), keyEquivalent: "")
-        let localASRItem = NSMenuItem(title: "ASR：腾讯云实时 ASR 大模型", action: nil, keyEquivalent: "")
+        let localASRItem = NSMenuItem(title: "ASR：腾讯云实时 ASR（中英自动）", action: nil, keyEquivalent: "")
+        let outputStyleMenu = NSMenu()
 
         shortcutItem.isEnabled = false
         localASRItem.isEnabled = false
+        configureOutputStyleMenu(outputStyleMenu)
+        outputStyleItem.submenu = outputStyleMenu
 
         menu.addItem(shortcutItem)
         menu.addItem(localASRItem)
         menu.addItem(settingsItem)
         menu.addItem(.separator())
-        menu.addItem(chineseItem)
-        menu.addItem(englishItem)
+        menu.addItem(chineseOutputItem)
+        menu.addItem(englishOutputItem)
+        menu.addItem(outputStyleItem)
+        menu.addItem(.separator())
+        menu.addItem(rewriteEvaluationItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "申请麦克风权限", action: #selector(requestMicrophonePermission), keyEquivalent: ""))
         menu.addItem(accessibilityItem)
@@ -64,13 +98,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shortcutMenuItem = shortcutItem
         shortcutSettingsMenuItem = settingsItem
         asrMenuItem = localASRItem
-        chineseMenuItem = chineseItem
-        englishMenuItem = englishItem
+        chineseOutputMenuItem = chineseOutputItem
+        englishOutputMenuItem = englishOutputItem
+        outputStyleMenuItem = outputStyleItem
+        rewriteEvaluationMenuItem = rewriteEvaluationItem
         accessibilityMenuItem = accessibilityItem
 
         item.menu = menu
         statusItem = item
         refreshMenuState()
+    }
+
+    private func configureOutputStyleMenu(_ menu: NSMenu) {
+        outputStyleMenuItems = [:]
+        for style in VoiceRewriteStyle.allCases {
+            let item = NSMenuItem(
+                title: style.menuTitle,
+                action: #selector(selectOutputStyle(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = style.rawValue
+            outputStyleMenuItems[style] = item
+            menu.addItem(item)
+        }
     }
 
     private func handleShortcutTriggered() {
@@ -89,22 +140,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             shortcut: voiceShortcut,
             onTrigger: { [weak self] in
                 self?.handleShortcutTriggered()
+            },
+            onCancel: { [weak self] in
+                self?.cancelCurrentSessionFromEscape()
             }
         )
         refreshMenuState()
     }
 
-    @objc private func selectChinese() {
+    @objc private func selectChineseOutput() {
         guard transcriptionService.state == .idle else { return }
-        selectedLanguage = .simplifiedChinese
-        captionPanel.reset(language: selectedLanguage, shortcut: voiceShortcut)
+        selectedOutputLanguage = .simplifiedChinese
+        captionPanel.reset()
         refreshMenuState()
     }
 
-    @objc private func selectEnglish() {
+    @objc private func selectEnglishOutput() {
         guard transcriptionService.state == .idle else { return }
-        selectedLanguage = .englishUS
-        captionPanel.reset(language: selectedLanguage, shortcut: voiceShortcut)
+        selectedOutputLanguage = .english
+        captionPanel.reset()
+        refreshMenuState()
+    }
+
+    @objc private func selectOutputStyle(_ sender: NSMenuItem) {
+        guard transcriptionService.state == .idle else { return }
+        guard let rawValue = sender.representedObject as? String,
+              let style = VoiceRewriteStyle(rawValue: rawValue) else {
+            return
+        }
+        selectedRewriteStyle = style
+        captionPanel.reset()
         refreshMenuState()
     }
 
@@ -114,11 +179,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.voiceShortcut = shortcut
             self.shortcutStore.save(shortcut)
             self.shortcutMonitor.updateShortcut(shortcut)
-            self.captionPanel.reset(language: self.selectedLanguage, shortcut: shortcut)
+            self.captionPanel.reset()
             self.refreshMenuState()
         }
         shortcutSettingsWindowController = controller
         controller.showWindow(nil)
+    }
+
+    @objc private func runRewriteEvaluation() {
+        guard transcriptionService.state == .idle, rewriteTask == nil else { return }
+        rewriteEvaluationMenuItem?.isEnabled = false
+        statusItem?.button?.title = "NexVoice 评测中"
+        captionPanel.showLoading("DeepSeek 评测中")
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let reportURL = await VoiceRewriteEvaluationRunner.runAndWriteReport()
+            self.captionPanel.showStatus("评测完成", isError: false, autoHideDelay: 1.4)
+            self.statusItem?.button?.title = "NexVoice"
+            self.rewriteEvaluationMenuItem?.isEnabled = true
+            self.showNotification(
+                title: "DeepSeek 评测完成",
+                body: "报告已写入：\(reportURL.path)"
+            )
+            self.refreshMenuState()
+        }
     }
 
     @objc private func openAccessibilitySettings() {
@@ -146,21 +230,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func beginTranscription() {
+        guard beginSessionTask == nil else { return }
+        beginSessionTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.beginTranscriptionAfterSelectionCapture()
+        }
+    }
+
+    private func beginTranscriptionAfterSelectionCapture() async {
         targetApplicationForCurrentSession = NSWorkspace.shared.frontmostApplication
+        selectedTextContextForCurrentSession = nil
+        rewriteContextForCurrentSession = nil
         didInsertCurrentSession = false
+        isCurrentSessionCancelled = false
         insertedTextPreview = nil
+        isRewritingCurrentSession = false
+        rewriteTask?.cancel()
+        rewriteTask = nil
 
         guard permissionService.authorizationStatus() == .authorized else {
-            captionPanel.showPreparing(language: selectedLanguage, shortcut: voiceShortcut)
+            captionPanel.showPreparing()
             requestMicrophonePermission()
+            beginSessionTask = nil
             return
         }
-        captionPanel.reset(language: selectedLanguage, shortcut: voiceShortcut)
-        captionPanel.showOverlay(language: selectedLanguage, shortcut: voiceShortcut)
+        selectedTextContextForCurrentSession = await textInserter.selectedTextContext(
+            in: targetApplicationForCurrentSession
+        )
+        let personalDictionary = VoicePersonalDictionaryStore.load()
+        rewriteContextForCurrentSession = textInserter.rewriteContext(
+            in: targetApplicationForCurrentSession,
+            selectedTextMode: selectedTextContextForCurrentSession?.text.isEmpty == false,
+            personalDictionary: personalDictionary
+        )
+        guard !isCurrentSessionCancelled, !Task.isCancelled else {
+            beginSessionTask = nil
+            return
+        }
+        captionPanel.reset()
+        captionPanel.showOverlay()
         do {
-            try transcriptionService.start(
-                configuration: LocalWhisperTranscriptionConfiguration(language: selectedLanguage)
-            ) { [weak self] event in
+            try transcriptionService.start(personalDictionary: personalDictionary) { [weak self] event in
                 Task { @MainActor [weak self] in
                     self?.handleTranscriptionEvent(event)
                 }
@@ -168,12 +278,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusItem?.button?.title = "NexVoice 听写中"
             refreshMenuState()
         } catch {
-            captionPanel.apply(.failed(message: error.localizedDescription))
-            showNotification(title: "语音输入启动失败", body: error.localizedDescription)
+            captionPanel.showStatus("启动失败", isError: true, autoHideDelay: 1.4)
+            statusItem?.button?.title = "NexVoice 出错"
+            refreshMenuState()
         }
+        beginSessionTask = nil
     }
 
     private func handleTranscriptionEvent(_ event: VoiceRealtimeEvent) {
+        guard !isCurrentSessionCancelled else { return }
+
+        if case .failed(let message) = event {
+            handleTranscriptionFailure(message)
+            return
+        }
+
+        if case .finalTranscript = event, !didInsertCurrentSession {
+            insertFinalTextIfNeeded(from: event)
+            return
+        }
+
+        if case .sessionEnded = event, isRewritingCurrentSession {
+            statusItem?.button?.title = "NexVoice 整理中"
+            refreshMenuState()
+            return
+        }
+
         if case .sessionEnded = event, let insertedTextPreview {
             statusItem?.button?.title = "NexVoice"
             captionPanel.showInsertedText(insertedTextPreview)
@@ -192,40 +322,174 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusItem?.button?.title = "NexVoice"
             refreshMenuState()
         case .failed:
-            statusItem?.button?.title = "NexVoice 出错"
-            refreshMenuState()
-            showNotification(title: "腾讯云转写失败", body: messageForFailedEvent(event))
+            break
         case .partialTranslation, .finalTranslation, .latencyUpdated, .audioLevelUpdated:
             break
         }
     }
 
     private func insertFinalTextIfNeeded(from event: VoiceRealtimeEvent) {
+        guard !isCurrentSessionCancelled else { return }
         guard !didInsertCurrentSession, let text = VoiceFinalTextPolicy.insertionText(from: event) else { return }
         didInsertCurrentSession = true
+        isRewritingCurrentSession = true
+        let isContextualCommand = selectedTextContextForCurrentSession?.text.isEmpty == false
+        captionPanel.showLoading(
+            isContextualCommand ? "AI 处理中" : "AI 整理中",
+            anchorRect: selectedTextContextForCurrentSession?.anchorRect
+        )
+        statusItem?.button?.title = "NexVoice 整理中"
+        refreshMenuState()
+
+        let originalText = text
+        let outputLanguage = selectedOutputLanguage
+        let rewriteStyle = selectedRewriteStyle
+        let selectedTextContext = selectedTextContextForCurrentSession
+        let rewriteContext = rewriteContextForCurrentSession ?? VoiceRewriteContext(
+            sourceApplicationName: targetApplicationForCurrentSession?.localizedName,
+            sourceApplicationBundleIdentifier: targetApplicationForCurrentSession?.bundleIdentifier,
+            selectedTextMode: selectedTextContext?.text.isEmpty == false,
+            personalDictionary: VoicePersonalDictionaryStore.load()
+        )
+        let targetApplication = targetApplicationForCurrentSession
+        rewriteTask?.cancel()
+        rewriteTask = Task { [weak self] in
+            guard let self else { return }
+            if let selectedTextContext, !selectedTextContext.text.isEmpty {
+                let result: String
+                do {
+                    result = try await self.finalRewriteService.handleSelectedTextCommand(
+                        selectedText: selectedTextContext.text,
+                        instruction: originalText,
+                        outputLanguage: outputLanguage,
+                        style: rewriteStyle,
+                        context: rewriteContext
+                    )
+                } catch is CancellationError {
+                    return
+                } catch {
+                    await MainActor.run {
+                        guard !self.isCurrentSessionCancelled else { return }
+                        self.selectedTextContextForCurrentSession = nil
+                        self.isRewritingCurrentSession = false
+                        self.rewriteTask = nil
+                        self.captionPanel.showStatus("处理失败", isError: true, autoHideDelay: 1.4)
+                        self.statusItem?.button?.title = "NexVoice 出错"
+                        self.refreshMenuState()
+                    }
+                    return
+                }
+                guard !Task.isCancelled else { return }
+
+                await MainActor.run {
+                    guard !self.isCurrentSessionCancelled else { return }
+                    self.showContextualResult(result, anchorRect: selectedTextContext.anchorRect)
+                }
+            } else {
+                let textForInsertion: String
+                do {
+                    textForInsertion = try await self.finalRewriteService.rewrite(
+                        originalText,
+                        outputLanguage: outputLanguage,
+                        style: rewriteStyle,
+                        context: rewriteContext
+                    )
+                } catch is CancellationError {
+                    return
+                } catch {
+                    textForInsertion = originalText
+                }
+                guard !Task.isCancelled else { return }
+
+                await MainActor.run {
+                    guard !self.isCurrentSessionCancelled else { return }
+                    self.insertRewrittenText(textForInsertion, into: targetApplication)
+                }
+            }
+        }
+    }
+
+    private func showContextualResult(_ text: String, anchorRect: CGRect?) {
+        selectedTextContextForCurrentSession = nil
+        rewriteContextForCurrentSession = nil
+        insertedTextPreview = nil
+        isRewritingCurrentSession = false
+        rewriteTask = nil
+        captionPanel.showContextualResult(text, anchorRect: anchorRect)
+        statusItem?.button?.title = "NexVoice"
+        refreshMenuState()
+    }
+
+    private func insertRewrittenText(_ text: String, into targetApplication: NSRunningApplication?) {
+        guard !isCurrentSessionCancelled else { return }
         insertedTextPreview = text
+        isRewritingCurrentSession = false
+        rewriteTask = nil
+        rewriteContextForCurrentSession = nil
 
         do {
-            try textInserter.insert(text, into: targetApplicationForCurrentSession)
+            try textInserter.insert(text, into: targetApplication)
             captionPanel.showInsertedText(text)
+            statusItem?.button?.title = "NexVoice"
+            refreshMenuState()
         } catch {
-            captionPanel.showOutputFailed(error.localizedDescription)
-            showNotification(title: "输入失败", body: error.localizedDescription)
+            captionPanel.showStatus("输入失败", isError: true, autoHideDelay: 1.4)
+            statusItem?.button?.title = "NexVoice 出错"
+            refreshMenuState()
         }
     }
 
     private func stopTranscription() {
-        captionPanel.hideRecordingOverlay()
+        captionPanel.showLoading("正在处理")
         transcriptionService.finish()
         statusItem?.button?.title = "NexVoice 等待腾讯云结果"
         refreshMenuState()
     }
 
-    private func messageForFailedEvent(_ event: VoiceRealtimeEvent) -> String {
-        if case .failed(let message) = event {
-            return message
+    private func cancelCurrentSessionFromEscape() {
+        guard VoiceSessionCancellationPolicy.shouldCancel(
+            transcriptionState: shortcutSessionState,
+            isRewriting: isRewritingCurrentSession,
+            hasRewriteTask: rewriteTask != nil
+        ) || beginSessionTask != nil else {
+            return
         }
-        return "请稍后再试。"
+        isCurrentSessionCancelled = true
+        didInsertCurrentSession = true
+        insertedTextPreview = nil
+        selectedTextContextForCurrentSession = nil
+        rewriteContextForCurrentSession = nil
+        targetApplicationForCurrentSession = nil
+        isRewritingCurrentSession = false
+        beginSessionTask?.cancel()
+        beginSessionTask = nil
+        rewriteTask?.cancel()
+        rewriteTask = nil
+        transcriptionService.stop()
+        captionPanel.showStatus("已取消", isError: false, autoHideDelay: 0.8)
+        statusItem?.button?.title = "NexVoice"
+        refreshMenuState()
+    }
+
+    private func handleTranscriptionFailure(_ message: String) {
+        guard !isCurrentSessionCancelled else { return }
+
+        if VoiceFinalTextPolicy.isNoRecognizedSpeechMessage(message) {
+            isRewritingCurrentSession = false
+            rewriteTask?.cancel()
+            rewriteTask = nil
+            captionPanel.showStatus("未识别到语音", isError: false, autoHideDelay: 0.9)
+            statusItem?.button?.title = "NexVoice"
+            refreshMenuState()
+            return
+        }
+
+        isRewritingCurrentSession = false
+        rewriteTask?.cancel()
+        rewriteTask = nil
+        captionPanel.showStatus("转写失败", isError: true, autoHideDelay: 1.4)
+        statusItem?.button?.title = "NexVoice 出错"
+        refreshMenuState()
     }
 
     private var shortcutSessionState: VoiceShortcutSessionState {
@@ -240,6 +504,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func quit() {
+        beginSessionTask?.cancel()
+        rewriteTask?.cancel()
         transcriptionService.stop()
         NSApp.terminate(nil)
     }
@@ -269,10 +535,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             shortcutSettingsMenuItem?.isEnabled = false
         }
 
-        chineseMenuItem?.state = selectedLanguage == .simplifiedChinese ? .on : .off
-        englishMenuItem?.state = selectedLanguage == .englishUS ? .on : .off
-        chineseMenuItem?.isEnabled = transcriptionService.state == .idle
-        englishMenuItem?.isEnabled = transcriptionService.state == .idle
+        chineseOutputMenuItem?.state = selectedOutputLanguage == .simplifiedChinese ? .on : .off
+        englishOutputMenuItem?.state = selectedOutputLanguage == .english ? .on : .off
+        chineseOutputMenuItem?.isEnabled = transcriptionService.state == .idle
+        englishOutputMenuItem?.isEnabled = transcriptionService.state == .idle
+        outputStyleMenuItem?.title = "输出模式：\(selectedRewriteStyle.menuTitle)"
+        outputStyleMenuItem?.isEnabled = transcriptionService.state == .idle
+        for (style, item) in outputStyleMenuItems {
+            item.state = style == selectedRewriteStyle ? .on : .off
+            item.isEnabled = transcriptionService.state == .idle
+        }
+        rewriteEvaluationMenuItem?.isEnabled = transcriptionService.state == .idle && rewriteTask == nil
 
         accessibilityMenuItem?.title = textInserter.canPostKeyboardEvents
             ? "辅助功能权限已允许"
@@ -283,7 +556,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             let credentials = try TencentCloudASRCredentialStore.load()
             if credentials.isComplete {
-                return "ASR：腾讯云实时 ASR 大模型"
+                return "ASR：腾讯云实时 ASR（中英自动）"
             }
             return "ASR：腾讯云实时 ASR（缺少 \(credentials.missingFieldNames.joined(separator: "、"))）"
         } catch {

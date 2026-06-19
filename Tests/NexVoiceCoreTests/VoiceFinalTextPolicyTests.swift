@@ -33,4 +33,6 @@ import Testing
 
 @Test func noSpeechDetectedMessageIsUserFacing() {
     #expect(VoiceFinalTextPolicy.noRecognizedSpeechMessage == "没有识别到语音，请确认麦克风输入后再试。")
+    #expect(VoiceFinalTextPolicy.isNoRecognizedSpeechMessage(" 没有识别到语音，请确认麦克风输入后再试。 "))
+    #expect(!VoiceFinalTextPolicy.isNoRecognizedSpeechMessage("腾讯云 ASR 连接失败"))
 }

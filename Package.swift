@@ -9,7 +9,8 @@ let package = Package(
     ],
     products: [
         .library(name: "NexVoiceCore", targets: ["NexVoiceCore"]),
-        .executable(name: "NexVoiceApp", targets: ["NexVoiceHost"])
+        .executable(name: "NexVoiceApp", targets: ["NexVoiceHost"]),
+        .executable(name: "NexVoiceRewriteEval", targets: ["NexVoiceRewriteEval"])
     ],
     dependencies: [
         .package(url: "https://github.com/argmaxinc/argmax-oss-swift.git", from: "1.0.0")
@@ -26,6 +27,11 @@ let package = Package(
                 .product(name: "WhisperKit", package: "argmax-oss-swift")
             ],
             path: "Sources/NexVoiceHost"
+        ),
+        .executableTarget(
+            name: "NexVoiceRewriteEval",
+            dependencies: ["NexVoiceCore"],
+            path: "Sources/NexVoiceRewriteEval"
         ),
         .testTarget(
             name: "NexVoiceCoreTests",

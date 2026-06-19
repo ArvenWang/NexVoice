@@ -44,7 +44,6 @@ public struct TencentCloudRealtimeASRConfiguration: Equatable, Sendable {
     public static let pathPrefix = "/asr/v2"
 
     public let credentials: TencentCloudASRCredentials
-    public let language: SpeechRecognitionLanguage
     public let voiceID: String
     public let timestamp: Int
     public let expired: Int
@@ -53,15 +52,13 @@ public struct TencentCloudRealtimeASRConfiguration: Equatable, Sendable {
 
     public init(
         credentials: TencentCloudASRCredentials,
-        language: SpeechRecognitionLanguage = .simplifiedChinese,
         voiceID: String = UUID().uuidString,
         timestamp: Int = Int(Date().timeIntervalSince1970),
         expired: Int? = nil,
         nonce: Int = Int.random(in: 1...9_999_999_999),
-        hotwordList: String? = "NexVoice|11,腾讯云|10,ASR|11"
+        hotwordList: String? = nil
     ) {
         self.credentials = credentials
-        self.language = language
         self.voiceID = voiceID
         self.timestamp = timestamp
         self.expired = expired ?? timestamp + 600
@@ -70,12 +67,7 @@ public struct TencentCloudRealtimeASRConfiguration: Equatable, Sendable {
     }
 
     public var engineModelType: String {
-        switch language {
-        case .simplifiedChinese:
-            return "16k_zh_en"
-        case .englishUS:
-            return "16k_en_large"
-        }
+        "16k_zh_en"
     }
 
     public var voiceFormat: Int { 1 }
@@ -109,7 +101,7 @@ public struct TencentCloudRealtimeASRConfiguration: Equatable, Sendable {
     }
 
     public var signaturePlaintext: String {
-        "\(Self.host)\(Self.pathPrefix)/\(credentials.appID)?\(Self.encodedQueryString(from: unsignedQueryItems))"
+        "\(Self.host)\(Self.pathPrefix)/\(credentials.appID)?\(Self.rawQueryString(from: unsignedQueryItems))"
     }
 
     public func signedWebSocketURL() throws -> URL {
@@ -133,6 +125,13 @@ public struct TencentCloudRealtimeASRConfiguration: Equatable, Sendable {
     public static func encodedQueryString(from items: [(String, String)]) -> String {
         items.map { key, value in
             "\(percentEncode(key))=\(percentEncode(value))"
+        }
+        .joined(separator: "&")
+    }
+
+    public static func rawQueryString(from items: [(String, String)]) -> String {
+        items.map { key, value in
+            "\(key)=\(value)"
         }
         .joined(separator: "&")
     }

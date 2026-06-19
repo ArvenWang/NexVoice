@@ -34,7 +34,7 @@ NexHub 当前仓库完成度不适合整体复制：
 | 早期 ASR 验证 | Apple Speech / `SFSpeechRecognizer` | 已移除；当前不再申请 macOS 系统语音识别权限 |
 | 默认本地 ASR | SenseVoice Small via sherpa-onnx | 中文、粤语和中英混合场景更值得优先验证；当前通过本地 Python venv + sherpa-onnx 调用 int8 模型，后续再收敛为内嵌 Swift framework |
 | 本地 ASR 兜底 | WhisperKit `large-v3-v20240930_626MB` | SwiftPM 原生接入，Apple Silicon 友好；保留为兜底和质量对照 |
-| 默认云端 ASR | 腾讯云实时语音识别大模型 | 速度优先；使用 `URLSessionWebSocketTask` 直连 WebSocket，默认 `16k_zh_en` / `16k_en_large`，按 200ms PCM 实时发送，结束后等待 `final=1` 再写入 |
+| 默认云端 ASR | 腾讯云实时语音识别大模型 | 速度优先；使用 `URLSessionWebSocketTask` 直连 WebSocket，固定 `16k_zh_en` 中英自动模型，按 200ms PCM 实时发送，结束后等待 `final=1` 再进入 AI 整理 |
 | 当前输入框写入 | Apple `NSPasteboard` + `CGEvent` 模拟 `Command+V` | 当前目标是把最终文本写进用户已聚焦的输入框；粘贴方式对原生、网页、Electron 输入框覆盖更广，且避免第一版自研输入法 |
 | 辅助功能权限 | Apple `AXIsProcessTrustedWithOptions` | 全局键盘事件接收和最终文本写回都依赖该权限；只打开设置页不会让 App 出现在辅助功能列表里，需要主动请求系统登记 |
 | 语音状态浮层 | Typeless 截图 + NexHub `ToolbarVoiceInputControl` 波形方向 | 深色胶囊、21 根细竖条、中间高两侧低；NexVoice 不展示草稿文字，最终文本直接写入当前输入框 |

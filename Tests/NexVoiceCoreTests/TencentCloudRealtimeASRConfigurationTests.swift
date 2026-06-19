@@ -9,7 +9,6 @@ import Testing
             secretID: "AKIDexample",
             secretKey: "secret"
         ),
-        language: .simplifiedChinese,
         voiceID: "voice-1",
         timestamp: 1_745_932_688,
         expired: 1_745_933_288,
@@ -19,24 +18,23 @@ import Testing
     #expect(configuration.engineModelType == "16k_zh_en")
     #expect(configuration.voiceFormat == 1)
     #expect(configuration.needVAD)
-    #expect(configuration.hotwordList == "NexVoice|11,腾讯云|10,ASR|11")
+    #expect(configuration.hotwordList == nil)
 }
 
-@Test func tencentRealtimeASRUsesEnglishLargeModelForEnglishInput() {
+@Test func tencentRealtimeASRAlwaysUsesChineseEnglishAutoModel() {
     let configuration = TencentCloudRealtimeASRConfiguration(
         credentials: TencentCloudASRCredentials(
             appID: "1250000000",
             secretID: "AKIDexample",
             secretKey: "secret"
         ),
-        language: .englishUS,
         voiceID: "voice-1",
         timestamp: 1_745_932_688,
         expired: 1_745_933_288,
         nonce: 8_743_357
     )
 
-    #expect(configuration.engineModelType == "16k_en_large")
+    #expect(configuration.engineModelType == "16k_zh_en")
 }
 
 @Test func tencentRealtimeASRBuildsSignedWebSocketURL() throws {
@@ -46,7 +44,6 @@ import Testing
             secretID: "AKIDexample",
             secretKey: "secret"
         ),
-        language: .simplifiedChinese,
         voiceID: "voice-1",
         timestamp: 1_745_932_688,
         expired: 1_745_933_288,
@@ -54,7 +51,7 @@ import Testing
         hotwordList: "NexVoice|11"
     )
 
-    #expect(configuration.signaturePlaintext == "asr.cloud.tencent.com/asr/v2/1250000000?convert_num_mode=1&engine_model_type=16k_zh_en&expired=1745933288&filter_dirty=0&filter_empty_result=1&filter_modal=0&filter_punc=0&hotword_list=NexVoice%7C11&max_speak_time=10000&needvad=1&nonce=8743357&secretid=AKIDexample&timestamp=1745932688&vad_silence_time=800&voice_format=1&voice_id=voice-1&word_info=0")
+    #expect(configuration.signaturePlaintext == "asr.cloud.tencent.com/asr/v2/1250000000?convert_num_mode=1&engine_model_type=16k_zh_en&expired=1745933288&filter_dirty=0&filter_empty_result=1&filter_modal=0&filter_punc=0&hotword_list=NexVoice|11&max_speak_time=10000&needvad=1&nonce=8743357&secretid=AKIDexample&timestamp=1745932688&vad_silence_time=800&voice_format=1&voice_id=voice-1&word_info=0")
     #expect(TencentCloudRealtimeASRSigner.hmacSHA1Base64(message: "message", key: "secret") == "DK9kn+7klT2Hv5A6wRdsReAo3xY=")
 
     let url = try configuration.signedWebSocketURL()
