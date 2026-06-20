@@ -120,6 +120,12 @@ final class FocusedTextInserter {
         )
     }
 
+    func focusedTextPreview(in targetApplication: NSRunningApplication?) -> String? {
+        let focusedElement = Self.focusedElement(in: targetApplication) ?? Self.systemFocusedElement()
+        let elementChain = focusedElement.map { Self.elementAndParents(from: $0, maxDepth: 4) } ?? []
+        return Self.focusedTextPreview(from: elementChain)
+    }
+
     @discardableResult
     static func requestAccessibilityPermission() -> Bool {
         let trusted = SystemPermissionRequester.requestAccessibilityPermission(prompt: true)

@@ -126,10 +126,6 @@ public struct VoiceRewriteContext: Equatable, Sendable {
             \(focusedTextPreview)
             """)
         }
-        if let dictionaryInstruction = personalDictionary.promptInstruction {
-            lines.append(dictionaryInstruction)
-        }
-
         return lines.joined(separator: "\n")
     }
 
@@ -142,6 +138,16 @@ public struct VoiceRewriteContext: Equatable, Sendable {
             personalDictionary.isEmpty ? "no_dictionary" : "dictionary_terms_\(personalDictionary.terms.count)"
         ]
         .joined(separator: "|")
+    }
+
+    public var hotwordContextKey: String {
+        if let bundleIdentifier = sourceApplicationBundleIdentifier, !bundleIdentifier.isEmpty {
+            return "bundle:\(bundleIdentifier.lowercased())"
+        }
+        if let applicationName = sourceApplicationName, !applicationName.isEmpty {
+            return "app:\(applicationName.lowercased())"
+        }
+        return "profile:\(applicationProfile.rawValue)"
     }
 
     private static func cleaned(_ value: String?) -> String? {
@@ -184,19 +190,7 @@ public enum VoiceRewritePromptRoutingPolicy {
         style: VoiceRewriteStyle,
         context: VoiceRewriteContext
     ) -> VoiceRewritePromptMode {
-        let sourceText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard operation == "final_rewrite",
-              outputLanguage == .simplifiedChinese,
-              style == .faithful,
-              !context.selectedTextMode,
-              sourceText.count <= 160,
-              isFastCompatibleDictionary(context.personalDictionary),
-              !sourceLooksFragmented(sourceText),
-              !VoicePromptInjectionPolicy.sourceLooksLikePromptInjection(sourceText)
-        else {
-            return .full
-        }
-        return .fast
+        .full
     }
 
     private static func isFastCompatibleDictionary(_ dictionary: VoicePersonalDictionary) -> Bool {

@@ -371,7 +371,10 @@ final class DeepSeekFinalRewriteService: Sendable {
             output: sanitizedRewrite,
             operation: operation
         ) {
-            let fallback = VoiceRewriteFallbackPolicy.fallbackText(for: sourceText ?? "")
+            let fallback = VoicePersonalDictionaryTextProtector.protect(
+                VoiceRewriteFallbackPolicy.fallbackText(for: sourceText ?? ""),
+                dictionary: context.personalDictionary
+            )
             guard !fallback.isEmpty else {
                 throw DeepSeekFinalRewriteError.emptyRewrite
             }
@@ -402,8 +405,12 @@ final class DeepSeekFinalRewriteService: Sendable {
             )
             return fallback
         }
+        let protectedRewrite = VoicePersonalDictionaryTextProtector.protect(
+            sanitizedRewrite,
+            dictionary: context.personalDictionary
+        )
         let qualityIssue = VoiceRewriteQualityPolicy.qualityIssue(
-            output: sanitizedRewrite,
+            output: protectedRewrite,
             operation: operation,
             outputLanguage: outputLanguage
         )
@@ -427,13 +434,13 @@ final class DeepSeekFinalRewriteService: Sendable {
                 selectedTextCharacters: selectedTextCharacters,
                 instructionCharacters: instructionCharacters,
                 contextSummary: context.diagnosticsSummary,
-                outputCharacters: sanitizedRewrite.count,
+                outputCharacters: protectedRewrite.count,
                 promptPreview: userPrompt,
-                outputPreview: sanitizedRewrite,
-                responseBodyPreview: qualityIssue ?? (sanitizedRewrite == rewritten ? nil : rewritten)
+                outputPreview: protectedRewrite,
+                responseBodyPreview: qualityIssue ?? (protectedRewrite == rewritten ? nil : rewritten)
             )
         )
-        return sanitizedRewrite
+        return protectedRewrite
     }
 
     private func logFailure(

@@ -34,7 +34,88 @@
 
 ## 最近更新
 
+### 2026-06-21
+
+- 优化词典学习成功 toast：
+  - 文案从包含别名的长句缩短为 `词条 已加入词库` / `词条 已更新词库`，避免信息过多。
+  - 底部状态浮层宽度改为按文字实际宽度自适应，最小保持原状态条宽度，最大不超过现有底部波形条舞台宽度，避免只显示中间一小段文字。
+  - 本轮验证：`swift test --disable-sandbox --quiet` 通过 118 个测试；`git diff --check` 通过；`CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceApp` 通过；`CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceRewriteEval` 通过；`./scripts/build_app.sh debug --embed-local-keys` 通过；`codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过；`plutil -lint dist/NexVoice.app/Contents/Info.plist` 通过；已启动新版 `dist/NexVoice.app`，当前 `NexVoiceApp` 进程 PID 为 `80077`。
+
+- 将词典学习成功提示从阻塞弹窗改为底部 toast：
+  - 学习成功/更新后不再弹需要点击确认的 `NSAlert`。
+  - 现在复用底部波形条位置和样式，通过 `VoiceCaptionPanelController.showStatus` 展示非阻塞提示，例如 `已加入个人词典：typeless，别名：Tablets`，约 2.2 秒后自动消失。
+  - 其他真正需要确认的系统提示暂未改动，例如评测报告路径、权限提示等。
+  - 本轮验证：`swift test --disable-sandbox --quiet` 通过 118 个测试；`git diff --check` 通过；`CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceApp` 通过；`CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceRewriteEval` 通过；`./scripts/build_app.sh debug --embed-local-keys` 通过；`codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过；`plutil -lint dist/NexVoice.app/Contents/Info.plist` 通过；已启动新版 `dist/NexVoice.app`，当前 `NexVoiceApp` 进程 PID 为 `70217`。
+
+- 继续修正“发出后仍未学习”的实测问题：
+  - 新日志显示用户修改后很快发送，旧实现还没等到 2.4 秒稳定窗口生成 `candidate_pending`，发送后输入框变为不可读或焦点读到其他短文本，导致没有候选可提交。
+  - 已改为编辑过程中实时缓存“最后一个有效候选”，但不入库、不显示学习中；只有提交信号出现时才真正学习。
+  - 提交信号当前包括：候选已存在后输入框不可读，或焦点读到明显不是当前输入内容的短文本。
+  - 这样可以覆盖“改完马上发送”的场景，同时避免回到编辑中提前入库的问题。
+  - 本轮验证：`swift test --disable-sandbox --quiet` 通过 118 个测试；`git diff --check` 通过；`CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceApp` 通过；`CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceRewriteEval` 通过；`./scripts/build_app.sh debug --embed-local-keys` 通过；`codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过；`plutil -lint dist/NexVoice.app/Contents/Info.plist` 通过；已启动新版 `dist/NexVoice.app`，当前 `NexVoiceApp` 进程 PID 为 `61393`。
+
+- 根据用户截图修正词典学习触发时机：
+  - 复盘日志确认误入库来自编辑中间态：`再去调研一下Tablets这个软件。 -> Tablets` 在用户尚未完成修改时被学习；真正目标修正是后续 `Tablets -> typeless`。
+  - 不再采用“稳定 2.4 秒后直接学习”的策略；现在文本稳定只会生成 `candidate_pending` 候选，不会入库。
+  - 真正学习改为等待提交信号：在候选生成后，如果输入框清空或变为不可读，视为用户已发送/提交，再触发 `commit_detected` 和后续学习。
+  - 本地规则也补了一层保护：如果旧词本身像完整句子，直接拒绝作为词典别名，避免把整句当作某个词的别名。
+  - 新增回归测试覆盖截图里的错误案例：`再去调研一下Tablets这个软件。 -> Tablets` 不会生成学习候选。
+  - 当前本机词库里仍保留用户复现时生成的错误词条 `Tablets`，本轮未擅自删除用户数据；可在 `个人词库...` 里选中删除。
+  - 本轮验证：`swift test --disable-sandbox --quiet` 通过 118 个测试；`git diff --check` 通过；`CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceApp` 通过；`CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceRewriteEval` 通过；`./scripts/build_app.sh debug --embed-local-keys` 通过；`codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过；`plutil -lint dist/NexVoice.app/Contents/Info.plist` 通过；已启动新版 `dist/NexVoice.app`，当前 `NexVoiceApp` 进程 PID 为 `47694`。
+
+- 修复用户反馈“重新把词改成 Typeless 但没有看到学习中”的问题：
+  - 定位结论：旧实现只在 8 秒和约 25 秒两个检查点读取输入框，用户稍晚修改或编辑过程中未刚好命中检查点时可能抓不到；同时本地快速入库会很快完成，`NexVoice 学习中` 可能一闪而过。
+  - 已将词典学习观察改为约 60 秒内每 2 秒连续检查一次，真实使用中更容易捕捉用户后续修词动作。
+  - 学习状态现在至少保留约 1.2 秒；即使是本地宽松规则立即入库，也能看到 `NexVoice 学习中`。
+  - 恢复并补强 `~/Library/Application Support/NexVoice/Logs/DictionaryLearning.jsonl` 日志，记录观察开始、候选被本地拒绝、候选检测、快照不可读和观察结束，便于下一次精准定位。
+  - 当前本机个人词库文件已被用户清空，`PersonalDictionary.json` 里暂无词条；下一次复现应能通过菜单状态、弹窗和日志判断是否学习成功。
+  - 本轮验证：`swift test --disable-sandbox --quiet` 通过 117 个测试；`git diff --check` 通过；`CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceApp` 通过；`CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceRewriteEval` 通过；`./scripts/build_app.sh debug --embed-local-keys` 通过；`codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过；`plutil -lint dist/NexVoice.app/Contents/Info.plist` 通过；已启动新版 `dist/NexVoice.app`，当前 `NexVoiceApp` 进程 PID 为 `31054`。
+
+- 补齐个人词库基础编辑能力，并收紧本地宽松入库规则：
+  - `个人词库...` 窗口新增 `删除所选`，支持多选删除；删除前会弹窗确认，删除失败会提示错误。
+  - `VoicePersonalDictionaryStore` 新增按词条删除并写回文件的方法，避免只在 UI 层临时隐藏。
+  - 本地宽松学习规则不再“所有单个英文词修改都直接入库”；现在单个英文 token 还需要像 ASR 误识别对（例如 `timeless -> typeless` 这种短距离相似修正）才会本地自动保存。
+  - `good -> great` 这类普通英文润色已被测试覆盖为不自动入库；混合大小写、数字、连字符、下划线等明显特殊词仍会宽松保存。
+  - 本轮验证：`swift test --disable-sandbox --quiet` 通过 117 个测试；`git diff --check` 通过；`CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceApp` 通过；`CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceRewriteEval` 通过；`./scripts/build_app.sh debug --embed-local-keys` 通过；`codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过；`plutil -lint dist/NexVoice.app/Contents/Info.plist` 通过；已启动新版 `dist/NexVoice.app`，当前 `NexVoiceApp` 进程 PID 为 `14020`。
+
+- 修复用户反馈的 `typeless` 未入库问题：
+  - 根因：之前的词典学习过度依赖 DeepSeek 判断；像 `timeless -> typeless` 这种单个英文词修正，模型可能认为它不是明确专有名词而返回“不入库”，导致用户已经手动修正但词库没有学习。
+  - 现已增加宽松本地兜底：单个英文/数字/连字符/下划线 token 的 A -> B 修正，以及包含大小写混合、数字、连字符、下划线的特殊词，会先直接自动入库，不再等待模型判断；标点、整句改写、普通润色、常见普通词仍会被排除。
+  - 已手动补入用户本次已修正词条：`typeless`，别名 `timeless`，并记录 Codex 场景权重，后续在 Codex 场景下会优先进入腾讯云 ASR 热词候选。
+- 补上菜单中的个人词库入口：
+  - 菜单新增 `个人词库...`。
+  - 新窗口可查看当前词条、别名、基础权重、场景权重和说明/状态，并支持刷新。
+- 本轮验证：
+  - `swift test --disable-sandbox --quiet` 通过 115 个测试。
+  - `git diff --check` 通过。
+  - `CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceApp` 通过。
+  - `CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceRewriteEval` 通过。
+  - `./scripts/build_app.sh debug --embed-local-keys` 通过并重新生成 `dist/NexVoice.app`。
+  - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过。
+  - `plutil -lint dist/NexVoice.app/Contents/Info.plist` 通过。
+  - 已启动新版 `dist/NexVoice.app`，当前 `NexVoiceApp` 进程 PID 为 `4931`。
+
 ### 2026-06-20
+
+- 按用户确认的“正常输入不变慢，词典学习异步后台做”原则重做个人词典学习链路：
+  - 停用默认 `Fast` prompt 路由；当前正式 `final_rewrite` 全部走完整 DeepSeek prompt，避免短 prompt 导致输出像“没改写”或只做轻微清理。
+  - 个人词库不再默认展开进 DeepSeek 改写 prompt，避免词库增长到几百/几千词后拖慢、变贵或干扰模型；dry-run 已确认报告中只保留 `dictionary_terms_N` 诊断摘要，不输出词条清单。
+  - 个人词库继续用于腾讯云 ASR `hotword_list`，但只按权重选最多 128 个热词；新增词条支持别名，便于把 `nex voice` / `next voice` 等误识别本地保护为 `NexVoice`。
+  - DeepSeek 正常改写返回后增加本地专名保护，不再二次调用大模型；当前用词条和别名做大小写/别名纠正，保守替换，避免拖慢主链路。
+  - 新增后台自动学习：普通语音写入后，短时间观察当前输入框；如果用户把单个词/短语从 A 改成 B，先用本地规则排除标点、语序、普通润色、整句重写和普通词，再异步交给 DeepSeek Flash 判断 B 是否应入个人词典。
+  - 后台学习判断使用宽松初期规则：人名、产品名、项目名、品牌名、公司名、模型名、技术术语、文件名、特殊拼写或固定大小写倾向保存；判断失败或网络失败不影响正常输入。
+  - 本轮验证：`swift test --disable-sandbox --quiet` 通过 111 个测试；`CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceApp` 通过；`CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceRewriteEval` 通过；`.build/debug/NexVoiceRewriteEval --dry-run --include-prompt --output eval_reports/deepseek-rewrite-eval-dictionary-learning-dry-run.md` 通过，并确认所有场景 `Prompt Mode：full`。
+- 继续补强词典学习体验、动态热词和本地构建环境：
+  - 后台词典学习真正开始 AI 判断时，菜单栏标题会显示 `NexVoice 学习中`；学习成功后弹窗提示新增/更新的词条和别名。
+  - 个人词典新增 `contextWeights`，记录词条在哪个 App / bundle / 场景里被学到；腾讯云 ASR 启动时会根据当前 `VoiceRewriteContext.hotwordContextKey` 动态计算热词权重和排序，避免 128 个热词名单长期固定不变。
+  - 自动学习写入词条时会给当前场景计数 +1；同一词在 Codex 等场景中反复学习后，该场景下会被优先传给腾讯云并临时提权，其他场景不被同等放大。
+  - 清理本地构建产物：退出旧 `dist/NexVoice.app` 进程，删除 `dist/NexVoice.app`、`dist/NexVoiceRewriteEval.app`、`dist/NexVoiceRewriteEvalRunner.app`，重新生成唯一最新 `dist/NexVoice.app`。
+  - 本轮验证：`swift test --disable-sandbox --quiet` 通过 113 个测试；`CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceApp` 通过；`CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceRewriteEval` 通过；`.build/debug/NexVoiceRewriteEval --dry-run --include-prompt --output eval_reports/deepseek-rewrite-eval-dictionary-learning-dry-run.md` 通过；`./scripts/build_app.sh debug --embed-local-keys` 通过并生成最新 `dist/NexVoice.app`；`codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过；`plutil -lint dist/NexVoice.app/Contents/Info.plist` 通过；当前 `dist` 下只剩 `NexVoice.app` 一个 App 包。
+- 修复“菜单栏一直显示 NexVoice 学习中”的状态卡死问题：
+  - 根因是后台词典学习只在成功入库时调用完成回调；如果模型判断“不应入库”、置信度不足、请求失败或 JSON 解析失败，会直接返回 `nil`，导致 `NexVoice 学习中` 没有机会复位。
+  - 现已改为学习任务计数：每次开始学习计数 +1，任何结果（成功、拒绝、失败、未入库）都会触发结束回调并计数 -1；只有成功入库才弹窗提示词条。
+  - 已退出卡住的旧 `dist/NexVoice.app` 进程，重新打包并启动最新 `dist/NexVoice.app`；当前新进程 PID 为 `82365`。
+  - 本轮验证：`swift test --disable-sandbox --quiet` 通过 113 个测试；`CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceApp` 通过；`./scripts/build_app.sh debug --embed-local-keys` 通过；`codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过；`plutil -lint dist/NexVoice.app/Contents/Info.plist` 通过。
 
 - 按用户最新决策，将“文风/强度”合并为一个单一 `输出模式`：
   - 不再把“文风”和“整理强度”拆成两个菜单，避免用户困惑。
@@ -558,7 +639,7 @@
 ## 下一步
 
 1. 用新生成的 `dist/NexVoice.app` 做真实右 Alt 语音验收，重点记录首个 partial、结束到 final、DeepSeek 改写、写入完成四段耗时。
-2. 用真实语音样本复测 fast/full 路由：普通短句应明显更快；碎片化、有改口、有结构要求的口述应优先保证整理质量。
+2. 用真实语音样本复测完整 DeepSeek 路径的速度和质量；如后续要恢复快速路径，必须先证明输出质量不低于完整路径。
 3. 商业化版本需要移除 App 内 `运行 DeepSeek 评测` 诊断入口，并把 API Key 方案改成用户私有配置或 Keychain；当前内置 Key 包只能用于本机私用验收。
 4. 继续对比腾讯云实时大模型、SenseVoice Small、WhisperKit large-v3 的中文和中英混合质量，决定是否保留本地兜底入口。
 

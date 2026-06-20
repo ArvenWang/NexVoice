@@ -43,6 +43,7 @@ final class TencentCloudRealtimeTranscriptionService: @unchecked Sendable {
 
     func start(
         personalDictionary: VoicePersonalDictionary = VoicePersonalDictionary(),
+        rewriteContext: VoiceRewriteContext? = nil,
         onEvent: @escaping @Sendable (VoiceRealtimeEvent) -> Void
     ) throws {
         guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
@@ -55,7 +56,7 @@ final class TencentCloudRealtimeTranscriptionService: @unchecked Sendable {
         let credentials = try credentialLoader()
         let cloudConfiguration = TencentCloudRealtimeASRConfiguration(
             credentials: credentials,
-            hotwordList: personalDictionary.hotwordList
+            hotwordList: personalDictionary.hotwordList(for: rewriteContext)
         )
         let url = try cloudConfiguration.signedWebSocketURL()
         let task = session.webSocketTask(with: url)

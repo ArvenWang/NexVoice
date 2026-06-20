@@ -101,7 +101,7 @@ struct VoiceRewriteEvaluationRunner {
 
         return [
             Scenario(
-                id: "fast-path-short-zh",
+                id: "full-path-short-zh",
                 title: "快速路径：短中文普通输入",
                 operation: .finalRewrite("我刚才试了一下，感觉现在速度比之前慢了很多，你帮我看一下原因。"),
                 outputLanguage: .simplifiedChinese,

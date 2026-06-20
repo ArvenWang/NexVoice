@@ -105,7 +105,7 @@ final class VoiceCaptionPanelController {
             animatePanelEntranceIfNeeded()
         }
         transition(from: stackView, to: loadingStackView)
-        updatePanelSize(to: VoiceWaveformDisplayPolicy.statusPanelSize, animated: true)
+        updatePanelSize(to: statusPanelSize(for: message), animated: true)
         scheduleHide(after: autoHideDelay)
     }
 
@@ -332,6 +332,7 @@ final class VoiceCaptionPanelController {
 
         loadingLabel.font = .systemFont(ofSize: VoiceWaveformDisplayPolicy.transcriptFontSize, weight: .medium)
         loadingLabel.textColor = NSColor.white.withAlphaComponent(0.82)
+        loadingLabel.lineBreakMode = .byTruncatingTail
 
         loadingStackView.addArrangedSubview(loadingIndicator)
         loadingStackView.addArrangedSubview(loadingLabel)
@@ -340,6 +341,16 @@ final class VoiceCaptionPanelController {
             loadingIndicator.widthAnchor.constraint(equalToConstant: 14),
             loadingIndicator.heightAnchor.constraint(equalToConstant: 14)
         ])
+    }
+
+    private func statusPanelSize(for message: String) -> CGSize {
+        let font = NSFont.systemFont(ofSize: VoiceWaveformDisplayPolicy.transcriptFontSize, weight: .medium)
+        let measuredWidth = ceil((message as NSString).size(withAttributes: [.font: font]).width)
+        let width = min(
+            VoiceWaveformDisplayPolicy.expandedPanelWidth,
+            max(VoiceWaveformDisplayPolicy.statusPanelSize.width, measuredWidth + 40)
+        )
+        return CGSize(width: width, height: VoiceWaveformDisplayPolicy.statusPanelSize.height)
     }
 
     private func setTranscriptText(_ text: String) {

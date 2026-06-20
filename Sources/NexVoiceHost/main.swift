@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var englishOutputMenuItem: NSMenuItem?
     private var outputStyleMenuItem: NSMenuItem?
     private var outputStyleMenuItems: [VoiceRewriteStyle: NSMenuItem] = [:]
+    private var personalDictionaryMenuItem: NSMenuItem?
     private var rewriteEvaluationMenuItem: NSMenuItem?
     private var accessibilityMenuItem: NSMenuItem?
     private let permissionService = MicrophonePermissionService()
@@ -19,9 +20,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let finalRewriteService = DeepSeekFinalRewriteService()
     private let captionPanel = VoiceCaptionPanelController()
     private let textInserter = FocusedTextInserter()
+    private lazy var dictionaryLearningMonitor = VoiceDictionaryAutoLearningMonitor(
+        textReader: textInserter,
+        onLearningStarted: { [weak self] in
+            self?.showDictionaryLearningStarted()
+        },
+        onLearningFinished: { [weak self] result in
+            self?.showDictionaryLearningFinished(result)
+        }
+    )
     private let shortcutStore = VoiceShortcutStore()
     private let shortcutMonitor = GlobalVoiceShortcutMonitor()
     private var shortcutSettingsWindowController: VoiceShortcutSettingsWindowController?
+    private var personalDictionaryWindowController: VoicePersonalDictionaryWindowController?
     private var selectedOutputLanguage = VoiceOutputLanguage.simplifiedChinese
     private var selectedRewriteStyle = VoiceRewriteStyle.default
     private var voiceShortcut: VoiceShortcut = .default
@@ -35,6 +46,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var beginSessionTask: Task<Void, Never>?
     private var rewriteTask: Task<Void, Never>?
     private var permissionRefreshWorkItem: DispatchWorkItem?
+    private var activeDictionaryLearningTasks = 0
+    private var dictionaryLearningResetWorkItem: DispatchWorkItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if shouldRunRewriteEvaluationOnly {
@@ -69,6 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let chineseOutputItem = NSMenuItem(title: "输出：中文", action: #selector(selectChineseOutput), keyEquivalent: "")
         let englishOutputItem = NSMenuItem(title: "输出：English", action: #selector(selectEnglishOutput), keyEquivalent: "")
         let outputStyleItem = NSMenuItem(title: "输出模式：\(selectedRewriteStyle.menuTitle)", action: nil, keyEquivalent: "")
+        let personalDictionaryItem = NSMenuItem(title: "个人词库...", action: #selector(openPersonalDictionary), keyEquivalent: "")
         let rewriteEvaluationItem = NSMenuItem(title: "运行 DeepSeek 评测", action: #selector(runRewriteEvaluation), keyEquivalent: "")
         let accessibilityItem = NSMenuItem(title: VoicePermissionGuidance.accessibility.actionTitle, action: #selector(openAccessibilitySettings), keyEquivalent: "")
         let localASRItem = NSMenuItem(title: "ASR：腾讯云实时 ASR（中英自动）", action: nil, keyEquivalent: "")
@@ -86,6 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(chineseOutputItem)
         menu.addItem(englishOutputItem)
         menu.addItem(outputStyleItem)
+        menu.addItem(personalDictionaryItem)
         menu.addItem(.separator())
         menu.addItem(rewriteEvaluationItem)
         menu.addItem(.separator())
@@ -101,6 +116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         chineseOutputMenuItem = chineseOutputItem
         englishOutputMenuItem = englishOutputItem
         outputStyleMenuItem = outputStyleItem
+        personalDictionaryMenuItem = personalDictionaryItem
         rewriteEvaluationMenuItem = rewriteEvaluationItem
         accessibilityMenuItem = accessibilityItem
 
@@ -186,6 +202,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.showWindow(nil)
     }
 
+    @objc private func openPersonalDictionary() {
+        let controller = personalDictionaryWindowController ?? VoicePersonalDictionaryWindowController()
+        personalDictionaryWindowController = controller
+        controller.showWindow(nil)
+    }
+
     @objc private func runRewriteEvaluation() {
         guard transcriptionService.state == .idle, rewriteTask == nil else { return }
         rewriteEvaluationMenuItem?.isEnabled = false
@@ -245,6 +267,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         isCurrentSessionCancelled = false
         insertedTextPreview = nil
         isRewritingCurrentSession = false
+        dictionaryLearningMonitor.cancel()
+        activeDictionaryLearningTasks = 0
+        dictionaryLearningResetWorkItem?.cancel()
+        dictionaryLearningResetWorkItem = nil
         rewriteTask?.cancel()
         rewriteTask = nil
 
@@ -270,7 +296,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         captionPanel.reset()
         captionPanel.showOverlay()
         do {
-            try transcriptionService.start(personalDictionary: personalDictionary) { [weak self] event in
+            try transcriptionService.start(
+                personalDictionary: personalDictionary,
+                rewriteContext: rewriteContextForCurrentSession
+            ) { [weak self] event in
                 Task { @MainActor [weak self] in
                     self?.handleTranscriptionEvent(event)
                 }
@@ -397,13 +426,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 } catch is CancellationError {
                     return
                 } catch {
-                    textForInsertion = VoiceRewriteFallbackPolicy.fallbackText(for: originalText)
+                    textForInsertion = VoicePersonalDictionaryTextProtector.protect(
+                        VoiceRewriteFallbackPolicy.fallbackText(for: originalText),
+                        dictionary: rewriteContext.personalDictionary
+                    )
                 }
                 guard !Task.isCancelled else { return }
 
                 await MainActor.run {
                     guard !self.isCurrentSessionCancelled else { return }
-                    self.insertRewrittenText(textForInsertion, into: targetApplication)
+                    self.insertRewrittenText(
+                        textForInsertion,
+                        originalASRText: originalText,
+                        rewriteContext: rewriteContext,
+                        into: targetApplication
+                    )
                 }
             }
         }
@@ -420,7 +457,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshMenuState()
     }
 
-    private func insertRewrittenText(_ text: String, into targetApplication: NSRunningApplication?) {
+    private func insertRewrittenText(
+        _ text: String,
+        originalASRText: String,
+        rewriteContext: VoiceRewriteContext,
+        into targetApplication: NSRunningApplication?
+    ) {
         guard !isCurrentSessionCancelled else { return }
         insertedTextPreview = text
         isRewritingCurrentSession = false
@@ -429,6 +471,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         do {
             try textInserter.insert(text, into: targetApplication)
+            dictionaryLearningMonitor.observePossibleEdit(
+                insertedText: text,
+                originalASRText: originalASRText,
+                rewrittenText: text,
+                context: rewriteContext,
+                targetApplication: targetApplication
+            )
             captionPanel.showInsertedText(text)
             statusItem?.button?.title = "NexVoice"
             refreshMenuState()
@@ -461,6 +510,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rewriteContextForCurrentSession = nil
         targetApplicationForCurrentSession = nil
         isRewritingCurrentSession = false
+        dictionaryLearningMonitor.cancel()
+        activeDictionaryLearningTasks = 0
+        dictionaryLearningResetWorkItem?.cancel()
+        dictionaryLearningResetWorkItem = nil
         beginSessionTask?.cancel()
         beginSessionTask = nil
         rewriteTask?.cancel()
@@ -506,6 +559,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func quit() {
         beginSessionTask?.cancel()
         rewriteTask?.cancel()
+        dictionaryLearningMonitor.cancel()
+        activeDictionaryLearningTasks = 0
+        dictionaryLearningResetWorkItem?.cancel()
+        dictionaryLearningResetWorkItem = nil
         transcriptionService.stop()
         NSApp.terminate(nil)
     }
@@ -546,10 +603,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.isEnabled = transcriptionService.state == .idle
         }
         rewriteEvaluationMenuItem?.isEnabled = transcriptionService.state == .idle && rewriteTask == nil
+        personalDictionaryMenuItem?.isEnabled = true
 
         accessibilityMenuItem?.title = textInserter.canPostKeyboardEvents
             ? "辅助功能权限已允许"
             : VoicePermissionGuidance.accessibility.actionTitle
+        if activeDictionaryLearningTasks > 0, transcriptionService.state == .idle, !isRewritingCurrentSession {
+            statusItem?.button?.title = "NexVoice 学习中"
+        }
+    }
+
+    private func showDictionaryLearningStarted() {
+        dictionaryLearningResetWorkItem?.cancel()
+        dictionaryLearningResetWorkItem = nil
+        activeDictionaryLearningTasks += 1
+        if transcriptionService.state == .idle, !isRewritingCurrentSession {
+            statusItem?.button?.title = "NexVoice 学习中"
+        }
+    }
+
+    private func showDictionaryLearningFinished(_ result: VoiceDictionaryLearningResult?) {
+        activeDictionaryLearningTasks = max(0, activeDictionaryLearningTasks - 1)
+        if activeDictionaryLearningTasks == 0,
+           transcriptionService.state == .idle,
+           !isRewritingCurrentSession {
+            let resetWorkItem = DispatchWorkItem { [weak self] in
+                Task { @MainActor [weak self] in
+                    guard let self,
+                          self.activeDictionaryLearningTasks == 0,
+                          self.transcriptionService.state == .idle,
+                          !self.isRewritingCurrentSession else {
+                        return
+                    }
+                    self.statusItem?.button?.title = "NexVoice"
+                    self.dictionaryLearningResetWorkItem = nil
+                }
+            }
+            dictionaryLearningResetWorkItem = resetWorkItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: resetWorkItem)
+        }
+        guard let result else { return }
+        let action = result.wasInserted ? "已加入词库" : "已更新词库"
+        captionPanel.showStatus(
+            "\(result.term) \(action)",
+            isError: false,
+            autoHideDelay: 2.2
+        )
     }
 
     private func cloudASRMenuTitle() -> String {

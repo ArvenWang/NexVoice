@@ -16,7 +16,7 @@ import Testing
     #expect(context.promptBlock.contains("Agent/开发协作"))
     #expect(context.promptBlock.contains("请帮我改一下这个功能"))
     #expect(context.promptBlock.contains("只作上下文"))
-    #expect(context.promptBlock.contains("NexVoice"))
+    #expect(!context.promptBlock.contains("用户个人词库"))
     #expect(context.diagnosticsSummary.contains("agentCollaboration"))
 }
 
@@ -49,7 +49,7 @@ import Testing
         outputLanguage: .simplifiedChinese,
         style: .faithful,
         context: VoiceRewriteContext()
-    ) == .fast)
+    ) == .full)
 
     #expect(VoiceRewritePromptRoutingPolicy.mode(
         for: "我刚才试了一下，感觉现在速度比之前慢了很多，你帮我看一下原因。",
@@ -63,7 +63,7 @@ import Testing
                 VoicePersonalDictionaryTerm(phrase: "Codex", weight: 8)
             ])
         )
-    ) == .fast)
+    ) == .full)
 
     #expect(VoiceRewritePromptRoutingPolicy.mode(
         for: "我又做了一次测评，你再帮我看一下，这次不仅要看刚才已有的问题，而且你还要看。呃，或者你直接列出来给我。嗯。",
