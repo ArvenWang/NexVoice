@@ -235,7 +235,7 @@ public enum VoiceRewriteTimeoutPolicy {
             return selectedTextCharacters ?? 0 > 600 || promptCharacters > 1_600 ? 12 : 9
         }
 
-        if style == .creativeWild {
+        if style == .amplifiedSpokesperson {
             return promptCharacters > 1_200 ? 12 : 8
         }
 
