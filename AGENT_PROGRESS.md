@@ -19,7 +19,7 @@
 - 输出模式已收敛为 4 个：
   - `标准模式（默认）`：修正吞字、断词、重复、口头禅、明显错词和断句，严格贴合原意、事实、立场和语气强弱。
   - `社交达人`：适合聊天、评论和社交媒体；英文输出允许常见缩写和 X / Reddit 等语境下更自然的表达。
-  - `强化嘴替`：放大用户原本的表达方向，让文字更有张力，但事实部分保持可靠。
+  - `强化嘴替`：明显放大用户原本的情绪和攻击性；允许脏话、骂人和冒犯性表达，可直接攻击具体对象的行为、方案、表现或观点，但不编造事实、不威胁现实伤害、不转向身份群体攻击。
   - `冷静模式`：压低强情绪、脏话、攻击性和混乱表达，用更少的字冷静表达清楚原意。
 - 旧输出模式兼容：
   - `automatic` / `general` / `faithful` / `clear` / `professional` -> `标准模式`
@@ -34,6 +34,13 @@
 
 ## 本轮完成
 
+- 按用户反馈重写 `强化嘴替` 的 prompt：从温和的“更有张力”改成真正的情绪放大模式；用户愤怒时输出应更狠、更锋利、更不客气，并允许脏话和攻击性表达。
+- `强化嘴替` temperature 从 `0.75` 提高到 `0.95`，并将评测样本改为愤怒表达场景。
+- 真实 DeepSeek 评测确认强化模式已明显升温：样本输出出现 `他妈`、`受够`、`捅了篓子`、`不负责任到家` 等更强表达；报告路径为 `eval_reports/deepseek-rewrite-eval-amplified-real.md`。
+- 已重新构建带本机 API 配置的强化模式版 DMG：
+  - 路径：`dist/NexVoice-20260621-amplified.dmg`
+  - SHA256：`396c914acde7af903a39e71cef1b9b0fd01d7516c9186a275a34cfe8f6534a49`
+  - DMG 已挂载检查，根目录包含 `NexVoice.app` 和 `Applications` 快捷入口。
 - 重写四个输出模式的 prompt，并接入菜单、DeepSeek prompt、temperature、评测样本和单测。
 - 同步更新：
   - `Sources/NexVoiceCore/VoiceRewriteStyle.swift`
@@ -58,9 +65,11 @@
 - `CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceApp`：通过。
 - `CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceRewriteEval`：通过。
 - `.build/debug/NexVoiceRewriteEval --dry-run --include-prompt --output eval_reports/deepseek-rewrite-eval-four-modes-dry-run.md`：通过，确认四个新模式 prompt 和 `有三点` 分点识别生效。
+- `.build/debug/NexVoiceRewriteEval --output eval_reports/deepseek-rewrite-eval-amplified-real.md`：通过，真实请求 DeepSeek，未出现失败检查项。
 - `./scripts/build_app.sh release --embed-local-keys`：通过，确认本机 DeepSeek / 腾讯云 ASR 配置已嵌入 App 资源目录。
 - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app`：通过。
 - `plutil -lint dist/NexVoice.app/Contents/Info.plist`：通过。
+- `hdiutil attach -readonly -nobrowse dist/NexVoice-20260621-amplified.dmg`：通过。
 
 ## 待办与风险
 

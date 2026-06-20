@@ -234,8 +234,9 @@ import Testing
 
     #expect(prompt.contains("强化嘴替"))
     #expect(prompt.contains("更有冲击力"))
-    #expect(prompt.contains("更有张力"))
-    #expect(prompt.contains("事实部分保持可靠"))
+    #expect(prompt.contains("不要为了礼貌降温"))
+    #expect(prompt.contains("允许使用脏话"))
+    #expect(prompt.contains("强于原文一个档位以上"))
 }
 
 @Test func rewritePromptCarriesCalmStyle() {

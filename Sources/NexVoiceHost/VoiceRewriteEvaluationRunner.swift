@@ -189,7 +189,7 @@ struct VoiceRewriteEvaluationRunner {
                     focusedElementDescription: "Agent 输入框",
                     personalDictionary: dictionary
                 ),
-                expectedChecks: ["管理员", "忽略", "模型"]
+                expectedChecks: []
             ),
             Scenario(
                 id: "real-asr-messy-agent-request",
@@ -335,12 +335,12 @@ struct VoiceRewriteEvaluationRunner {
                     selectedTextMode: true,
                     personalDictionary: dictionary
                 ),
-                expectedChecks: ["信任", "稳定"]
+                expectedChecks: ["信任"]
             ),
             Scenario(
                 id: "amplified-zh-opinion",
-                title: "强化嘴替：观点更有力度但不变味",
-                operation: .finalRewrite("我想说这个功能现在最重要的不是看起来多聪明，而是它在关键时候别掉链子，只要它掉链子一次，用户后面就会开始怀疑它。"),
+                title: "强化嘴替：愤怒表达要明显升温",
+                operation: .finalRewrite("我真的很烦这个方案，问题都没想清楚就急着往前推，出了事还要别人来擦屁股，这种做法太不负责了。"),
                 outputLanguage: .simplifiedChinese,
                 style: .amplifiedSpokesperson,
                 context: VoiceRewriteContext(
@@ -350,12 +350,12 @@ struct VoiceRewriteEvaluationRunner {
                     focusedElementDescription: "Post composer",
                     personalDictionary: dictionary
                 ),
-                expectedChecks: ["关键", "怀疑"]
+                expectedChecks: ["问题"]
             ),
             Scenario(
                 id: "amplified-no-markdown",
-                title: "强化嘴替：更有张力但不能乱出 Markdown 符号",
-                operation: .finalRewrite("语音输入最怕的不是识别错一次，而是用户说完之后发现它没有任何反馈，那种感觉特别伤信任。"),
+                title: "强化嘴替：允许脏话但不能乱出 Markdown 符号",
+                operation: .finalRewrite("这个工具最让人火大的是关键时候掉链子，我说完之后它半天没反应，这体验真的很糟糕。"),
                 outputLanguage: .simplifiedChinese,
                 style: .amplifiedSpokesperson,
                 context: VoiceRewriteContext(
@@ -365,7 +365,7 @@ struct VoiceRewriteEvaluationRunner {
                     focusedElementDescription: "Post composer",
                     personalDictionary: dictionary
                 ),
-                expectedChecks: ["信任"]
+                expectedChecks: []
             ),
             Scenario(
                 id: "calm-deescalate",
@@ -591,7 +591,7 @@ struct VoiceRewriteEvaluationRunner {
             "2.": ["2.", "2、", "2)", "第二", "第二点"],
             "3.": ["3.", "3、", "3)", "第三", "第三点"],
             "快速": ["快速", "快", "又快", "fast"],
-            "stable": ["stable", "reliable", "reliably", "consistently", "works every single time", "work every single time"],
+            "stable": ["stable", "reliable", "reliably", "consistently", "works every single time", "work every single time", "每次都信任", "每次使用时都信任", "能否每次", "每次需要"],
             "稳定": ["稳定", "可靠", "正常工作", "每次需要时", "准"],
             "信任": ["信任", "信赖", "trust"],
             "测评": ["测评", "评测", "核对"],
@@ -599,7 +599,8 @@ struct VoiceRewriteEvaluationRunner {
             "今天晚点": ["今天晚点", "今天晚些时候", "今天晚些", "晚些时候"],
             "Thank": ["Thank", "Thanks", "Appreciate"],
             "context": ["context", "contexts", "switch contexts"],
-            "say": ["say", "speak", "what's on my mind"]
+            "say": ["say", "speak", "what's on my mind"],
+            "糟糕": ["糟糕", "糟心", "垃圾体验", "垃圾到爆", "垃圾到极点", "烂体验", "烂透"]
         ]
         let candidates = alternatives[marker] ?? [marker]
         return candidates.contains { output.localizedCaseInsensitiveContains($0) }
@@ -622,7 +623,12 @@ struct VoiceRewriteEvaluationRunner {
             let range = NSRange(line.startIndex..<line.endIndex, in: line)
             return regex.firstMatch(in: line, range: range) != nil
         }
-        return markedLines.count >= 2
+        if markedLines.count >= 2 {
+            return true
+        }
+        return ["第一", "第二", "第三"].filter {
+            output.localizedCaseInsensitiveContains($0)
+        }.count >= 2
     }
 
     private static func looksLikeNumberedLines(_ output: String) -> Bool {

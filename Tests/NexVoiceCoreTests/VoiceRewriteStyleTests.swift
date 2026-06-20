@@ -25,7 +25,9 @@ import Testing
     #expect(VoiceRewriteStyle.socialExpert.promptInstruction.contains("不硬加梗"))
     #expect(VoiceRewriteStyle.amplifiedSpokesperson.promptInstruction.contains("强化嘴替"))
     #expect(VoiceRewriteStyle.amplifiedSpokesperson.promptInstruction.contains("更有冲击力"))
-    #expect(VoiceRewriteStyle.amplifiedSpokesperson.promptInstruction.contains("更有张力"))
+    #expect(VoiceRewriteStyle.amplifiedSpokesperson.promptInstruction.contains("不要为了礼貌降温"))
+    #expect(VoiceRewriteStyle.amplifiedSpokesperson.promptInstruction.contains("允许使用脏话"))
+    #expect(VoiceRewriteStyle.amplifiedSpokesperson.promptInstruction.contains("强于原文一个档位以上"))
     #expect(VoiceRewriteStyle.calm.promptInstruction.contains("冷静模式"))
     #expect(VoiceRewriteStyle.calm.promptInstruction.contains("用尽量少的字"))
     #expect(VoiceRewriteStyle.calm.promptInstruction.contains("语气冷静"))
@@ -36,7 +38,7 @@ import Testing
     #expect(VoiceRewriteStyle.standard.rewriteTemperature == 0.1)
     #expect(VoiceRewriteStyle.calm.rewriteTemperature == 0.15)
     #expect(VoiceRewriteStyle.socialExpert.rewriteTemperature == 0.35)
-    #expect(VoiceRewriteStyle.amplifiedSpokesperson.rewriteTemperature == 0.75)
+    #expect(VoiceRewriteStyle.amplifiedSpokesperson.rewriteTemperature == 0.95)
     #expect(VoiceRewriteStyle.standard.rewriteTemperature < VoiceRewriteStyle.amplifiedSpokesperson.rewriteTemperature)
 }
 
