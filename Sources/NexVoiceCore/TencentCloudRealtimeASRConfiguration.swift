@@ -173,9 +173,16 @@ public enum TencentCloudASRCredentialStore {
             .appendingPathComponent("TencentCloudASR.json")
     }
 
+    public static var defaultBundledFileURL: URL? {
+        Bundle.main.resourceURL?
+            .appendingPathComponent("NexVoiceEmbeddedConfig", isDirectory: true)
+            .appendingPathComponent("TencentCloudASR.json")
+    }
+
     public static func load(
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        fileURL: URL = defaultFileURL
+        fileURL: URL = defaultFileURL,
+        bundledFileURL: URL? = defaultBundledFileURL
     ) throws -> TencentCloudASRCredentials {
         let environmentCredentials = TencentCloudASRCredentials(
             appID: environment[appIDEnvironmentKey] ?? "",
@@ -186,9 +193,19 @@ public enum TencentCloudASRCredentialStore {
             return environmentCredentials
         }
 
-        guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            return environmentCredentials
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            return try loadFileCredentials(from: fileURL)
         }
+
+        if let bundledFileURL,
+           FileManager.default.fileExists(atPath: bundledFileURL.path) {
+            return try loadFileCredentials(from: bundledFileURL)
+        }
+
+        return environmentCredentials
+    }
+
+    private static func loadFileCredentials(from fileURL: URL) throws -> TencentCloudASRCredentials {
         let data = try Data(contentsOf: fileURL)
         let fileCredentials = try JSONDecoder().decode(FileCredentials.self, from: data)
         return TencentCloudASRCredentials(

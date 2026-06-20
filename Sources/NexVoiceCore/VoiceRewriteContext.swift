@@ -10,15 +10,15 @@ public enum VoiceApplicationRewriteProfile: String, Codable, Sendable {
     public var promptHint: String {
         switch self {
         case .general:
-            return "通用输入：保持清晰、自然、少加工，优先让文字可直接发送。"
+            return "通用：清晰自然，少加工，可直接发送。"
         case .agentCollaboration:
-            return "AI Agent 或开发工具协作：保留用户是在提问、请求判断、下达任务还是补充约束；只在原文确实是任务清单时整理成目标、约束、步骤和期望结果。"
+            return "Agent/开发协作：保留提问、判断、任务和约束；仅真实清单才编号。"
         case .socialConversation:
-            return "社交评论或公开回复：表达要像真人自然发言，避免翻译腔、营销腔和过度正式。"
+            return "社交评论：像真人自然发言，避免翻译腔、营销腔和过度正式。"
         case .emailReply:
-            return "邮件或正式回复：表达要礼貌、清楚、有分寸，但不要写成模板化公文。"
+            return "邮件回复：礼貌清楚、有分寸，不模板化。"
         case .workChat:
-            return "即时沟通：保持简洁、自然、行动明确，避免过长铺垫。"
+            return "即时沟通：简洁自然，行动明确，少铺垫。"
         }
     }
 }
@@ -110,19 +110,19 @@ public struct VoiceRewriteContext: Equatable, Sendable {
         var lines = [
             "当前上下文：",
             "- 应用：\(sourceApplicationName ?? "未知")",
-            "- 应用类型倾向：\(applicationProfile.promptHint)",
-            "- 交互模式：\(selectedTextMode ? "选中文本 + 语音指令" : "普通语音输入")"
+            "- 类型：\(applicationProfile.promptHint)",
+            "- 模式：\(selectedTextMode ? "选中文本+语音指令" : "普通语音输入")"
         ]
 
         if let focusedElementRole {
-            lines.append("- 焦点控件：\(focusedElementRole)")
+            lines.append("- 焦点：\(focusedElementRole)")
         }
         if let focusedElementDescription {
-            lines.append("- 焦点说明：\(focusedElementDescription)")
+            lines.append("- 说明：\(focusedElementDescription)")
         }
         if let focusedTextPreview, !focusedTextPreview.isEmpty {
             lines.append("""
-            - 输入框已有内容片段（仅供判断上下文，不要复述、改写、续写或合并进最终输出）：
+            - 输入框片段（只作上下文，除非原文要求引用/续写，否则不要写入结果）：
             \(focusedTextPreview)
             """)
         }
@@ -159,14 +159,84 @@ public struct VoiceRewriteContext: Equatable, Sendable {
     }
 }
 
+public enum VoiceRewritePromptMode: String, Codable, Sendable {
+    case fast
+    case full
+}
+
+public struct VoiceRewritePromptPlan: Equatable, Sendable {
+    public let mode: VoiceRewritePromptMode
+    public let systemPrompt: String
+    public let userPrompt: String
+
+    public init(mode: VoiceRewritePromptMode, systemPrompt: String, userPrompt: String) {
+        self.mode = mode
+        self.systemPrompt = systemPrompt
+        self.userPrompt = userPrompt
+    }
+}
+
+public enum VoiceRewritePromptRoutingPolicy {
+    public static func mode(
+        for text: String,
+        operation: String,
+        outputLanguage: VoiceOutputLanguage,
+        style: VoiceRewriteStyle,
+        context: VoiceRewriteContext
+    ) -> VoiceRewritePromptMode {
+        let sourceText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard operation == "final_rewrite",
+              outputLanguage == .simplifiedChinese,
+              style == .faithful,
+              !context.selectedTextMode,
+              sourceText.count <= 160,
+              isFastCompatibleDictionary(context.personalDictionary),
+              !sourceLooksFragmented(sourceText),
+              !VoicePromptInjectionPolicy.sourceLooksLikePromptInjection(sourceText)
+        else {
+            return .full
+        }
+        return .fast
+    }
+
+    private static func isFastCompatibleDictionary(_ dictionary: VoicePersonalDictionary) -> Bool {
+        dictionary.terms.count <= 8
+            && dictionary.terms.allSatisfy { term in
+                term.phrase.count <= 32 && (term.note?.count ?? 0) <= 80
+            }
+    }
+
+    private static func sourceLooksFragmented(_ text: String) -> Bool {
+        guard text.count >= 40 else { return false }
+
+        let stopWords = ["呃", "嗯", "啊", "就是", "那个"]
+        let stopWordCount = stopWords.reduce(0) { count, word in
+            count + text.components(separatedBy: word).count - 1
+        }
+        let shortSentenceCount = text
+            .components(separatedBy: CharacterSet(charactersIn: "。！？!?"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0.count <= 4 }
+            .count
+
+        return stopWordCount >= 2 || shortSentenceCount >= 3
+    }
+}
+
 public enum VoiceRewriteTimeoutPolicy {
     public static func timeoutSeconds(
         operation: String,
         promptCharacters: Int,
         selectedTextCharacters: Int?,
         sourceTextCharacters: Int? = nil,
-        style: VoiceRewriteStyle = .default
+        sourceText: String? = nil,
+        style: VoiceRewriteStyle = .default,
+        promptMode: VoiceRewritePromptMode = .full
     ) -> TimeInterval {
+        if promptMode == .fast {
+            return sourceLooksFragmented(sourceText) ? 8 : 6
+        }
+
         if operation == "selected_text_command" {
             return selectedTextCharacters ?? 0 > 600 || promptCharacters > 1_600 ? 12 : 9
         }
@@ -176,7 +246,13 @@ public enum VoiceRewriteTimeoutPolicy {
         }
 
         if let sourceTextCharacters {
+            if sourceLooksFragmented(sourceText) {
+                return 12
+            }
             if sourceTextCharacters > 260 {
+                return 12
+            }
+            if sourceTextCharacters > 160 {
                 return 12
             }
             if sourceTextCharacters > 90 {
@@ -192,6 +268,24 @@ public enum VoiceRewriteTimeoutPolicy {
             return 10
         }
         return 10
+    }
+
+    private static func sourceLooksFragmented(_ sourceText: String?) -> Bool {
+        guard let sourceText else { return false }
+        let text = sourceText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.count >= 40 else { return false }
+
+        let stopWords = ["呃", "嗯", "啊", "就是", "那个"]
+        let stopWordCount = stopWords.reduce(0) { count, word in
+            count + text.components(separatedBy: word).count - 1
+        }
+        let shortSentenceCount = text
+            .components(separatedBy: CharacterSet(charactersIn: "。！？!?"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0.count <= 4 }
+            .count
+
+        return stopWordCount >= 2 || shortSentenceCount >= 3
     }
 }
 

@@ -46,14 +46,15 @@ final class DeepSeekFinalRewriteService: Sendable {
     ) async throws -> String {
         let originalText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !originalText.isEmpty else { throw DeepSeekFinalRewriteError.emptyRewrite }
+        let promptPlan = VoiceRewritePromptPolicy.promptPlan(
+            for: originalText,
+            outputLanguage: outputLanguage,
+            style: style,
+            context: context
+        )
 
         return try await complete(
-            userPrompt: VoiceRewritePromptPolicy.userPrompt(
-                for: originalText,
-                outputLanguage: outputLanguage,
-                style: style,
-                context: context
-            ),
+            promptPlan: promptPlan,
             operation: "final_rewrite",
             outputLanguage: outputLanguage,
             style: style,
@@ -75,15 +76,16 @@ final class DeepSeekFinalRewriteService: Sendable {
         let selectedText = selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
         let instruction = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !selectedText.isEmpty, !instruction.isEmpty else { throw DeepSeekFinalRewriteError.emptyRewrite }
+        let promptPlan = VoiceRewritePromptPolicy.selectedTextCommandPromptPlan(
+            selectedText: selectedText,
+            instruction: instruction,
+            outputLanguage: outputLanguage,
+            style: style,
+            context: context
+        )
 
         return try await complete(
-            userPrompt: VoiceRewritePromptPolicy.selectedTextCommandPrompt(
-                selectedText: selectedText,
-                instruction: instruction,
-                outputLanguage: outputLanguage,
-                style: style,
-                context: context
-            ),
+            promptPlan: promptPlan,
             operation: "selected_text_command",
             outputLanguage: outputLanguage,
             style: style,
@@ -96,7 +98,7 @@ final class DeepSeekFinalRewriteService: Sendable {
     }
 
     private func complete(
-        userPrompt: String,
+        promptPlan: VoiceRewritePromptPlan,
         operation: String,
         outputLanguage: VoiceOutputLanguage,
         style: VoiceRewriteStyle,
@@ -108,6 +110,7 @@ final class DeepSeekFinalRewriteService: Sendable {
     ) async throws -> String {
         let requestID = UUID().uuidString
         let startedAt = Date()
+        let userPrompt = promptPlan.userPrompt
         let configuration: DeepSeekFinalRewriteConfiguration
         do {
             configuration = try configurationLoader()
@@ -118,6 +121,7 @@ final class DeepSeekFinalRewriteService: Sendable {
                 outputLanguage: outputLanguage,
                 style: style,
                 temperature: temperature,
+                promptMode: promptPlan.mode,
                 selectedTextCharacters: selectedTextCharacters,
                 instructionCharacters: instructionCharacters,
                 context: context,
@@ -134,7 +138,9 @@ final class DeepSeekFinalRewriteService: Sendable {
                 promptCharacters: userPrompt.count,
                 selectedTextCharacters: selectedTextCharacters,
                 sourceTextCharacters: instructionCharacters,
-                style: style
+                sourceText: sourceText,
+                style: style,
+                promptMode: promptPlan.mode
             )
         )
 
@@ -147,6 +153,7 @@ final class DeepSeekFinalRewriteService: Sendable {
                 endpointHost: configuration.chatCompletionsURL.host,
                 outputLanguage: outputLanguage.rawValue,
                 rewriteStyle: style.rawValue,
+                promptMode: promptPlan.mode.rawValue,
                 temperature: temperature,
                 timeoutSeconds: requestTimeoutSeconds,
                 promptCharacters: userPrompt.count,
@@ -167,6 +174,7 @@ final class DeepSeekFinalRewriteService: Sendable {
                 endpointHost: configuration.chatCompletionsURL.host,
                 timeoutSeconds: requestTimeoutSeconds,
                 temperature: temperature,
+                promptMode: promptPlan.mode,
                 selectedTextCharacters: selectedTextCharacters,
                 instructionCharacters: instructionCharacters,
                 context: context,
@@ -187,11 +195,13 @@ final class DeepSeekFinalRewriteService: Sendable {
                 DeepSeekChatCompletionRequest(
                     model: configuration.model,
                     messages: [
-                        .init(role: "system", content: VoiceRewritePromptPolicy.systemPrompt),
+                        .init(role: "system", content: promptPlan.systemPrompt),
                         .init(role: "user", content: userPrompt)
                     ],
                     stream: false,
-                    temperature: temperature
+                    temperature: temperature,
+                    maxTokens: configuration.maxOutputTokens,
+                    thinking: .disabled
                 )
             )
         } catch {
@@ -204,6 +214,7 @@ final class DeepSeekFinalRewriteService: Sendable {
                 endpointHost: configuration.chatCompletionsURL.host,
                 timeoutSeconds: requestTimeoutSeconds,
                 temperature: temperature,
+                promptMode: promptPlan.mode,
                 selectedTextCharacters: selectedTextCharacters,
                 instructionCharacters: instructionCharacters,
                 context: context,
@@ -228,6 +239,7 @@ final class DeepSeekFinalRewriteService: Sendable {
                 endpointHost: configuration.chatCompletionsURL.host,
                 timeoutSeconds: requestTimeoutSeconds,
                 temperature: temperature,
+                promptMode: promptPlan.mode,
                 selectedTextCharacters: selectedTextCharacters,
                 instructionCharacters: instructionCharacters,
                 context: context,
@@ -247,6 +259,7 @@ final class DeepSeekFinalRewriteService: Sendable {
                 endpointHost: configuration.chatCompletionsURL.host,
                 timeoutSeconds: requestTimeoutSeconds,
                 temperature: temperature,
+                promptMode: promptPlan.mode,
                 selectedTextCharacters: selectedTextCharacters,
                 instructionCharacters: instructionCharacters,
                 context: context,
@@ -267,6 +280,7 @@ final class DeepSeekFinalRewriteService: Sendable {
                 endpointHost: configuration.chatCompletionsURL.host,
                 timeoutSeconds: requestTimeoutSeconds,
                 temperature: temperature,
+                promptMode: promptPlan.mode,
                 selectedTextCharacters: selectedTextCharacters,
                 instructionCharacters: instructionCharacters,
                 context: context,
@@ -292,6 +306,7 @@ final class DeepSeekFinalRewriteService: Sendable {
                 endpointHost: configuration.chatCompletionsURL.host,
                 timeoutSeconds: requestTimeoutSeconds,
                 temperature: temperature,
+                promptMode: promptPlan.mode,
                 selectedTextCharacters: selectedTextCharacters,
                 instructionCharacters: instructionCharacters,
                 context: context,
@@ -316,6 +331,7 @@ final class DeepSeekFinalRewriteService: Sendable {
                 endpointHost: configuration.chatCompletionsURL.host,
                 timeoutSeconds: requestTimeoutSeconds,
                 temperature: temperature,
+                promptMode: promptPlan.mode,
                 selectedTextCharacters: selectedTextCharacters,
                 instructionCharacters: instructionCharacters,
                 context: context,
@@ -338,6 +354,7 @@ final class DeepSeekFinalRewriteService: Sendable {
                 endpointHost: configuration.chatCompletionsURL.host,
                 timeoutSeconds: requestTimeoutSeconds,
                 temperature: temperature,
+                promptMode: promptPlan.mode,
                 selectedTextCharacters: selectedTextCharacters,
                 instructionCharacters: instructionCharacters,
                 context: context,
@@ -354,7 +371,7 @@ final class DeepSeekFinalRewriteService: Sendable {
             output: sanitizedRewrite,
             operation: operation
         ) {
-            let fallback = VoiceRewriteOutputSanitizer.sanitize(sourceText ?? "")
+            let fallback = VoiceRewriteFallbackPolicy.fallbackText(for: sourceText ?? "")
             guard !fallback.isEmpty else {
                 throw DeepSeekFinalRewriteError.emptyRewrite
             }
@@ -367,6 +384,7 @@ final class DeepSeekFinalRewriteService: Sendable {
                     endpointHost: configuration.chatCompletionsURL.host,
                     outputLanguage: outputLanguage.rawValue,
                     rewriteStyle: style.rawValue,
+                    promptMode: promptPlan.mode.rawValue,
                     temperature: temperature,
                     timeoutSeconds: requestTimeoutSeconds,
                     latencyMs: Self.milliseconds(since: startedAt),
@@ -399,6 +417,7 @@ final class DeepSeekFinalRewriteService: Sendable {
                 endpointHost: configuration.chatCompletionsURL.host,
                 outputLanguage: outputLanguage.rawValue,
                 rewriteStyle: style.rawValue,
+                promptMode: promptPlan.mode.rawValue,
                 temperature: temperature,
                 timeoutSeconds: requestTimeoutSeconds,
                 latencyMs: Self.milliseconds(since: startedAt),
@@ -426,6 +445,7 @@ final class DeepSeekFinalRewriteService: Sendable {
         endpointHost: String? = nil,
         timeoutSeconds: Double? = nil,
         temperature: Double,
+        promptMode: VoiceRewritePromptMode? = nil,
         selectedTextCharacters: Int?,
         instructionCharacters: Int?,
         context: VoiceRewriteContext,
@@ -444,6 +464,7 @@ final class DeepSeekFinalRewriteService: Sendable {
                 endpointHost: endpointHost,
                 outputLanguage: outputLanguage.rawValue,
                 rewriteStyle: style.rawValue,
+                promptMode: promptMode?.rawValue,
                 temperature: temperature,
                 timeoutSeconds: timeoutSeconds,
                 latencyMs: Self.milliseconds(since: startedAt),
@@ -470,10 +491,27 @@ private struct DeepSeekChatCompletionRequest: Encodable {
     let messages: [Message]
     let stream: Bool
     let temperature: Double
+    let maxTokens: Int
+    let thinking: Thinking
 
     struct Message: Encodable {
         let role: String
         let content: String
+    }
+
+    struct Thinking: Encodable {
+        let type: String
+
+        static let disabled = Thinking(type: "disabled")
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case model
+        case messages
+        case stream
+        case temperature
+        case maxTokens = "max_tokens"
+        case thinking
     }
 }
 

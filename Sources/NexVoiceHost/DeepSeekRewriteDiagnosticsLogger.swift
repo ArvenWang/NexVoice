@@ -52,6 +52,7 @@ struct DeepSeekRewriteDiagnosticEvent: Encodable {
     let endpointHost: String?
     let outputLanguage: String?
     let rewriteStyle: String?
+    let promptMode: String?
     let temperature: Double?
     let timeoutSeconds: Double?
     let latencyMs: Int?
@@ -76,6 +77,7 @@ struct DeepSeekRewriteDiagnosticEvent: Encodable {
         endpointHost: String? = nil,
         outputLanguage: String? = nil,
         rewriteStyle: String? = nil,
+        promptMode: String? = nil,
         temperature: Double? = nil,
         timeoutSeconds: Double? = nil,
         latencyMs: Int? = nil,
@@ -100,6 +102,7 @@ struct DeepSeekRewriteDiagnosticEvent: Encodable {
         self.endpointHost = endpointHost
         self.outputLanguage = outputLanguage
         self.rewriteStyle = rewriteStyle
+        self.promptMode = promptMode
         self.temperature = temperature
         self.timeoutSeconds = timeoutSeconds
         self.latencyMs = latencyMs

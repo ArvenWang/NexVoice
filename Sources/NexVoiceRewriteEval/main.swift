@@ -24,17 +24,17 @@ private struct EvaluationScenario {
         }
     }
 
-    var prompt: String {
+    var promptPlan: VoiceRewritePromptPlan {
         switch operation {
         case .finalRewrite(let text):
-            return VoiceRewritePromptPolicy.userPrompt(
+            return VoiceRewritePromptPolicy.promptPlan(
                 for: text,
                 outputLanguage: outputLanguage,
                 style: style,
                 context: context
             )
         case .selectedTextCommand(let selectedText, let instruction):
-            return VoiceRewritePromptPolicy.selectedTextCommandPrompt(
+            return VoiceRewritePromptPolicy.selectedTextCommandPromptPlan(
                 selectedText: selectedText,
                 instruction: instruction,
                 outputLanguage: outputLanguage,
@@ -42,6 +42,14 @@ private struct EvaluationScenario {
                 context: context
             )
         }
+    }
+
+    var prompt: String {
+        promptPlan.userPrompt
+    }
+
+    var promptMode: VoiceRewritePromptMode {
+        promptPlan.mode
     }
 
     var inputText: String {
@@ -59,10 +67,27 @@ private struct DeepSeekChatCompletionRequest: Encodable {
     let messages: [Message]
     let stream: Bool
     let temperature: Double
+    let maxTokens: Int
+    let thinking: Thinking
 
     struct Message: Encodable {
         let role: String
         let content: String
+    }
+
+    struct Thinking: Encodable {
+        let type: String
+
+        static let disabled = Thinking(type: "disabled")
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case model
+        case messages
+        case stream
+        case temperature
+        case maxTokens = "max_tokens"
+        case thinking
     }
 }
 
@@ -114,7 +139,9 @@ struct RewriteEvaluationTool {
                         promptCharacters: scenario.prompt.count,
                         selectedTextCharacters: selectedTextCharacters(for: scenario),
                         sourceTextCharacters: sourceTextCharacters(for: scenario),
-                        style: scenario.style
+                        sourceText: finalRewriteSourceText(for: scenario),
+                        style: scenario.style,
+                        promptMode: scenario.promptMode
                     ),
                     output: nil,
                     error: nil,
@@ -173,6 +200,20 @@ struct RewriteEvaluationTool {
 
         return [
             EvaluationScenario(
+                id: "fast-path-short-zh",
+                title: "快速路径：短中文普通输入",
+                operation: .finalRewrite("我刚才试了一下，感觉现在速度比之前慢了很多，你帮我看一下原因。"),
+                outputLanguage: .simplifiedChinese,
+                style: .faithful,
+                context: VoiceRewriteContext(
+                    sourceApplicationName: "Codex",
+                    sourceApplicationBundleIdentifier: "com.openai.codex",
+                    focusedElementRole: "AXTextArea",
+                    focusedElementDescription: "Agent 输入框"
+                ),
+                expectedChecks: ["速度", "原因"]
+            ),
+            EvaluationScenario(
                 id: "agent-zh-structure",
                 title: "Agent 协作：中文结构化需求",
                 operation: .finalRewrite("""
@@ -188,7 +229,7 @@ struct RewriteEvaluationTool {
                     focusedTextPreview: "请继续实现 NexVoice 的语音输入稳定性优化。",
                     personalDictionary: dictionary
                 ),
-                expectedChecks: ["1.", "低延迟", "loading", "剪贴板"]
+                expectedChecks: ["低延迟", "loading", "剪贴板"]
             ),
             EvaluationScenario(
                 id: "agent-zh-natural-no-list",
@@ -524,7 +565,9 @@ struct RewriteEvaluationTool {
                 promptCharacters: scenario.prompt.count,
                 selectedTextCharacters: selectedTextCharacters(for: scenario),
                 sourceTextCharacters: sourceTextCharacters(for: scenario),
-                style: scenario.style
+                sourceText: finalRewriteSourceText(for: scenario),
+                style: scenario.style,
+                promptMode: scenario.promptMode
             )
         )
 
@@ -539,11 +582,13 @@ struct RewriteEvaluationTool {
                 DeepSeekChatCompletionRequest(
                     model: configuration.model,
                     messages: [
-                        .init(role: "system", content: VoiceRewritePromptPolicy.systemPrompt),
+                        .init(role: "system", content: scenario.promptPlan.systemPrompt),
                         .init(role: "user", content: scenario.prompt)
                     ],
                     stream: false,
-                    temperature: scenario.style.rewriteTemperature
+                    temperature: scenario.style.rewriteTemperature,
+                    maxTokens: configuration.maxOutputTokens,
+                    thinking: .disabled
                 )
             )
             let session = URLSession(configuration: .ephemeral)
@@ -635,16 +680,22 @@ struct RewriteEvaluationTool {
         if scenario.id == "prompt-injection-model-leak-guard" {
             checks.append(("未执行 Prompt 注入", !looksLikeExecutedPromptInjection(output)))
         }
+        if scenario.id == "agent-zh-structure" || scenario.id == "explicit-structured" {
+            checks.append(("结构分段清楚", looksLikeSegmentedStructure(output)))
+        }
+        if scenario.id == "agent-literal-instruction-preserve" {
+            checks.append(("未拆成执行步骤", !looksNumberedList(output)))
+        }
         return checks
     }
 
     private static func markerMatches(_ marker: String, in output: String) -> Bool {
         let alternatives: [String: [String]] = [
-            "1.": ["1.", "1、", "第一", "一，"],
-            "2.": ["2.", "2、", "第二", "二，"],
-            "3.": ["3.", "3、", "第三", "三，"],
+            "1.": ["1.", "1、", "1)", "第一", "第一点"],
+            "2.": ["2.", "2、", "2)", "第二", "第二点"],
+            "3.": ["3.", "3、", "3)", "第三", "第三点"],
             "快速": ["快速", "快", "又快", "fast"],
-            "stable": ["stable", "reliable", "reliably", "consistently"],
+            "stable": ["stable", "reliable", "reliably", "consistently", "works every single time", "work every single time"],
             "稳定": ["稳定", "可靠", "正常工作", "每次需要时", "准"],
             "信任": ["信任", "信赖", "trust"],
             "测评": ["测评", "评测", "核对"],
@@ -661,6 +712,33 @@ struct RewriteEvaluationTool {
     private static func containsQuestionMarker(_ output: String) -> Bool {
         ["？", "?", "是否", "是不是", "有没有", "要不要", "吗"].contains {
             output.localizedCaseInsensitiveContains($0)
+        }
+    }
+
+    private static func looksLikeSegmentedStructure(_ output: String) -> Bool {
+        let markerPattern = #"^\s*(?:[1-9][\.、\)]|第[一二三四五六七八九十]+点?[：:、，.]?)\s*\S+"#
+        let lines = output
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let markedLines = lines.filter { line in
+            guard let regex = try? NSRegularExpression(pattern: markerPattern) else { return false }
+            let range = NSRange(line.startIndex..<line.endIndex, in: line)
+            return regex.firstMatch(in: line, range: range) != nil
+        }
+        return markedLines.count >= 2
+    }
+
+    private static func looksLikeNumberedLines(_ output: String) -> Bool {
+        let patterns = [
+            #"(?m)^\s*(?:1[\.、\)]|第一点?[：:、，.]?)\s*\S+"#,
+            #"(?m)^\s*(?:2[\.、\)]|第二点?[：:、，.]?)\s*\S+"#,
+            #"(?m)^\s*(?:3[\.、\)]|第三点?[：:、，.]?)\s*\S+"#
+        ]
+        return patterns.allSatisfy { pattern in
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+            let range = NSRange(output.startIndex..<output.endIndex, in: output)
+            return regex.firstMatch(in: output, range: range) != nil
         }
     }
 
@@ -713,6 +791,7 @@ struct RewriteEvaluationTool {
             lines.append("- 操作：\(result.scenario.operationName)")
             lines.append("- 输出语言：\(result.scenario.outputLanguage.rawValue)")
             lines.append("- 输出模式：\(result.scenario.style.rawValue)")
+            lines.append("- Prompt Mode：\(result.scenario.promptMode.rawValue)")
             lines.append("- Temperature：\(result.scenario.style.rewriteTemperature)")
             if let timeoutSeconds = result.timeoutSeconds {
                 lines.append("- Timeout：\(Int(timeoutSeconds))s")

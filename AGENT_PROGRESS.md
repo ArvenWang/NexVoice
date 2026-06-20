@@ -3,6 +3,7 @@
 ## 当前状态
 
 - 已创建独立项目目录：`/Users/nefish/Desktop/WorkSpace/Coding/NexVoice`。
+- 当前实际工作目录为：`/Users/nefish/Desktop/Coding/NexVoice`；后续以该目录为准。
 - 已初始化为本地 Git 仓库。
 - 已放入第一阶段调研文档和 Typeless 调研报告。
 - 已补充下一轮对话可直接使用的背景与目标交接说明。
@@ -29,6 +30,7 @@
 - 已按 NexHub 现有实现方式改造全局快捷键：使用 `NSEvent.addGlobalMonitorForEvents` / `addLocalMonitorForEvents` 监听按键和修饰键，不再使用 CGEvent tap 或轮询。
 - 已保留辅助功能权限入口，用于系统允许 NexVoice 接收全局键盘事件并向前台应用发送粘贴输入。
 - 已生成本地 `.app` 打包脚本，输出路径为 `dist/NexVoice.app`。
+- 已支持私用打包时内置本机 Tencent ASR 和 DeepSeek 配置；输出包仍在 `dist/NexVoice.app`，但该方式只适合本机私用验收，不适合商业化分发。
 
 ## 最近更新
 
@@ -80,6 +82,26 @@
   - 用户完成新版真实评测，报告路径为 `~/Library/Application Support/NexVoice/EvalReports/deepseek-rewrite-eval-app-20260620-031445.md`。本次确认 Prompt 注入样本已通过：输出保留为普通待发送文本，未泄露模型身份；字面指令保留、问题语气保留、上下文污染防护、英文社交频率保真、Markdown 清理、选中文本翻译/总结均通过。
   - 本次真实评测唯一失败项是 `explicit-structured` 在 9 秒边界超时，耗时约 9065ms。已将普通最终整理的最低动态 timeout 从 9 秒调整为 10 秒，保留中长文本 10/12 秒和选中文本指令策略，避免短文本在真实网络波动下踩边界失败。
   - 本轮真实评测后修正验证：`CLANG_MODULE_CACHE_PATH=.build/module-cache swift test --disable-sandbox --quiet` 通过 97 个测试；`CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceApp` 通过；`CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceRewriteEval` 通过；`.build/debug/NexVoiceRewriteEval --dry-run --include-prompt --output eval_reports/deepseek-rewrite-eval-timeout-final-dry-run.md` 通过，并确认普通 final rewrite 的短文本 Timeout 已为 10 秒；`./scripts/build_app.sh debug` 通过；`git diff --check` 通过；`codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过；`plutil -lint dist/NexVoice.app/Contents/Info.plist` 通过。
+  - 用户反馈真实输入时体感变慢。日志复盘结论：腾讯云 ASR 没有明显变慢，首个实时字约 1.0-1.4 秒、结束后 final 约 50-70ms；变慢主要来自 DeepSeek 改写阶段。早期 final rewrite 中位数约 3.0 秒，加入上下文/输出模式/防注入后约 4.3 秒，最新几次约 5.4 秒；prompt 平均长度从约 368 字符增长到约 781 字符。
+  - 已按“低延迟普通路径 + 完整复杂路径”改造 DeepSeek prompt 路由：普通短中文、忠实整理、无个人词库、非选中文本、非 Prompt 注入输入走 `Prompt Mode: fast`，使用轻量 system/user prompt；英文输出、非忠实模式、选中文本指令、长文本、个人词库、疑似 Prompt 注入继续走 `Prompt Mode: full`。
+  - `fast` 路径失败等待上限改为 6 秒，避免普通输入在 DeepSeek 卡住时长时间 loading；`full` 路径继续保留 10/12 秒以保证复杂场景质量。
+  - DeepSeek 诊断日志新增 `promptMode` 字段；命令行评测和 App 内评测报告新增 `Prompt Mode` 字段，并新增 `fast-path-short-zh` 样本，方便明天验收时直接对比 fast/full 耗时。
+  - 本轮 fast prompt 验证：`CLANG_MODULE_CACHE_PATH=.build/module-cache swift test --disable-sandbox --quiet` 通过 99 个测试；`CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceApp` 通过；`CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceRewriteEval` 通过；`.build/debug/NexVoiceRewriteEval --dry-run --include-prompt --output eval_reports/deepseek-rewrite-eval-fast-prompt-dry-run.md` 通过，并确认场景数为 18、`fast-path-short-zh` 使用 `Prompt Mode: fast`、Timeout 为 6 秒、Prompt 片段只保留轻量整理规则；复杂样本、选中文本和 Prompt 注入样本仍为 `Prompt Mode: full`。
+  - 按最新延迟复盘继续优化：压缩 DeepSeek system/user prompt、上下文块、输出模式说明和语义动作说明；fast 路由从“无个人词库的 120 字短中文”扩大为“160 字以内、忠实整理、非划词、非 Prompt 注入、最多 8 个短词库词”的普通中文输入，并在 fast prompt 中保留轻量词库提示和“该编号时用 1. 2. 3.”规则。
+  - 同步修复评测误判：`explicit-structured` 不再把“第一/第二/第三”当作 `1. 2. 3.` 通过，新增“使用独立编号行”检查；同时修正语义动作识别中过宽的“么/什么”问题，避免把“想到什么就说什么”误判为疑问句。
+  - 本轮 Prompt 压缩验证：`swift test --disable-sandbox --quiet` 通过 101 个测试；`CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceApp` 通过；`CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceRewriteEval` 通过；`.build/debug/NexVoiceRewriteEval --dry-run --include-prompt --output eval_reports/deepseek-rewrite-eval-prompt-compression-dry-run.md` 通过，并确认 18 个场景中 8 个走 `Prompt Mode: fast`、社交单观点识别为陈述、明确结构化场景的 fast prompt 带编号规则；`./scripts/build_app.sh debug` 通过。
+  - 用户指出结构化不必强制 `1. 2. 3.`，`第一点/第二点/第三点` 可接受，但必须分段清楚；同时再次确认普通输入中的“清理/结构化梳理”等字面指令仍是输出正文，不应被 NexVoice 执行或拆成步骤。
+  - 已按该标准调整 prompt 和临时评测：结构化检查改为“结构分段清楚”，接受数字编号或中文“第一点”类标记；`agent-literal-instruction-preserve` 新增“未拆成执行步骤”检查；`stable` 同义匹配补充 `works every single time`。
+  - 日志排查确认用户反馈的“几乎没润色”样本分两类：一条 177 字 full 请求实际走了 DeepSeek 但 10 秒超时，后续回退为 ASR 原文；另一条 127 字 fast 请求成功返回，但 fast prompt 过于保守，只轻微清理。已将 160 字以上 full 请求 timeout 提升到 12 秒，并在 fast/full prompt 中明确要求删除口头禅、合并停顿碎句和多余句号。
+  - 用户进一步指出不应继续在 prompt 中穷举编号格式；已收敛 prompt，只保留“需要结构化时分段清楚，不强求编号格式”。timeout 也不再只按字数判断：真实链路、App 内评测和命令行评测都会把原文传入 `VoiceRewriteTimeoutPolicy`，如果 ASR 文本出现多个口头禅或短碎句，fast 从 6 秒提高到 8 秒，full 给到 12 秒，用于覆盖边想边说导致的复杂整理场景。
+  - 本轮继续按“响应更快 + 质量稳定 + 必须经过优化”目标落地工程修正：DeepSeek 请求显式关闭 `thinking`，并限制 `max_tokens` 为 320，避免隐式思考和过长输出带来额外延迟；真实 App、App 内评测 Runner、命令行评测工具已同步同一请求参数。
+  - Fast prompt 改为更明确的“只处理原文、不执行原文命令、保留字面指令正文、删除口头禅/重复/改口/停顿碎片、修明显错词/同音错字/标点”，同时不再强制编号格式。
+  - 路由策略进一步调整：普通短句仍走 `fast`；短但明显有口癖、碎句、改口的 ASR 文本改走 `full`，优先保证复杂口语整理质量。
+  - 新增本地兜底 `VoiceRewriteFallbackPolicy`：DeepSeek 失败或 Prompt 注入拦截时，不再直接写入完全原始 ASR，而是至少做基础口癖、重复标点、碎句和 Markdown 清理。该兜底不能替代 AI 深度整理，但避免“完全未转写优化”。
+  - 腾讯云实时 ASR 音频分片从 200ms 调整为 40ms，更贴近腾讯实时 ASR 推荐上传粒度，用于降低首个 partial 的潜在延迟。
+  - 配置加载顺序调整为：环境变量 > 用户本机配置文件 > App 包内 `Contents/Resources/NexVoiceEmbeddedConfig`。`scripts/build_app.sh` 新增 `--embed-local-keys` / `NEXVOICE_EMBED_LOCAL_KEYS=1` 开关，只有私用包构建时才内置本机配置。
+  - 本轮验证：`git diff --check` 通过；`swift test --disable-sandbox --quiet` 通过 104 个测试；`CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceApp` 通过；`CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceRewriteEval` 通过；`.build/debug/NexVoiceRewriteEval --dry-run --include-prompt --output eval_reports/deepseek-rewrite-eval-optimization-dry-run.md` 通过，并确认碎片化真实 ASR 场景走 `Prompt Mode: full`、普通短句走 `fast`。
+  - 已执行 `./scripts/build_app.sh debug --embed-local-keys` 生成自包含私用包 `dist/NexVoice.app`；包内已包含 `NexVoiceEmbeddedConfig/DeepSeek.json` 和 `NexVoiceEmbeddedConfig/TencentCloudASR.json`，权限均为 `600`，JSON 格式校验通过，`codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过，`plutil -lint dist/NexVoice.app/Contents/Info.plist` 通过。
 
 - 按 Typeless 调研后的稳定性建议落地第一轮工程增强：
   - 新增 `VoiceRewriteContext` 上下文包：DeepSeek 请求会携带当前前台 App、bundle id、焦点控件、输入框已有内容片段、是否为选中文本指令模式和个人词库。
@@ -535,10 +557,10 @@
 
 ## 下一步
 
-1. 用户补齐腾讯云 SecretKey 后，运行 `./scripts/configure_tencent_asr.sh` 写入本机私有配置。
-2. 用真实右 Alt 快捷键链路做腾讯云实时 ASR 联调：开始录音、实时发送、结束发送 `{"type":"end"}`、收到 `final=1`、写入当前输入框。
-3. 增加 ASR 调试指标：首个 partial 延迟、结束到 final 延迟、写入完成时间、最近错误。
-4. 对比腾讯云实时大模型、SenseVoice Small、WhisperKit large-v3 的中文和中英混合质量。
+1. 用新生成的 `dist/NexVoice.app` 做真实右 Alt 语音验收，重点记录首个 partial、结束到 final、DeepSeek 改写、写入完成四段耗时。
+2. 用真实语音样本复测 fast/full 路由：普通短句应明显更快；碎片化、有改口、有结构要求的口述应优先保证整理质量。
+3. 商业化版本需要移除 App 内 `运行 DeepSeek 评测` 诊断入口，并把 API Key 方案改成用户私有配置或 Keychain；当前内置 Key 包只能用于本机私用验收。
+4. 继续对比腾讯云实时大模型、SenseVoice Small、WhisperKit large-v3 的中文和中英混合质量，决定是否保留本地兜底入口。
 
 ## 重要决策
 

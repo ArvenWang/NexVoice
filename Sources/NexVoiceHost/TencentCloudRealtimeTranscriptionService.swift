@@ -61,7 +61,7 @@ final class TencentCloudRealtimeTranscriptionService: @unchecked Sendable {
         let task = session.webSocketTask(with: url)
         let sessionID = UUID().uuidString
         let startedAt = Date()
-        let frameDurationMilliseconds = 200
+        let frameDurationMilliseconds = 40
 
         lock.withLock {
             self.eventHandler = onEvent

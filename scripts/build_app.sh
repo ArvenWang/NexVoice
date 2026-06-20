@@ -2,15 +2,32 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONFIGURATION="${1:-debug}"
+CONFIGURATION="debug"
+EMBED_LOCAL_KEYS="${NEXVOICE_EMBED_LOCAL_KEYS:-0}"
+for arg in "$@"; do
+  case "$arg" in
+    debug|release)
+      CONFIGURATION="$arg"
+      ;;
+    --embed-local-keys)
+      EMBED_LOCAL_KEYS="1"
+      ;;
+    *)
+      echo "Unknown argument: $arg" >&2
+      exit 1
+      ;;
+  esac
+done
 PRODUCT_NAME="NexVoiceApp"
 APP_NAME="NexVoice"
 APP_DIR="$ROOT_DIR/dist/$APP_NAME.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
+EMBEDDED_CONFIG_DIR="$RESOURCES_DIR/NexVoiceEmbeddedConfig"
 INFO_PLIST="$ROOT_DIR/Resources/NexVoiceHost/Info.plist"
 SIGN_IDENTITY="${NEXVOICE_CODESIGN_IDENTITY:-}"
+APP_SUPPORT_DIR="$HOME/Library/Application Support/NexVoice"
 
 cd "$ROOT_DIR"
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-/private/tmp/nexvoice-clang-cache}"
@@ -31,6 +48,22 @@ printf "APPL????" > "$CONTENTS_DIR/PkgInfo"
 if [[ -f "$ROOT_DIR/Resources/NexVoiceHost/SenseVoiceTranscriber.py" ]]; then
   cp "$ROOT_DIR/Resources/NexVoiceHost/SenseVoiceTranscriber.py" "$RESOURCES_DIR/SenseVoiceTranscriber.py"
   chmod 755 "$RESOURCES_DIR/SenseVoiceTranscriber.py"
+fi
+if [[ "$EMBED_LOCAL_KEYS" == "1" || "$EMBED_LOCAL_KEYS" == "true" ]]; then
+  mkdir -p "$EMBEDDED_CONFIG_DIR"
+
+  for config_file in DeepSeek.json TencentCloudASR.json; do
+    source_file="$APP_SUPPORT_DIR/$config_file"
+    target_file="$EMBEDDED_CONFIG_DIR/$config_file"
+    if [[ ! -s "$source_file" ]]; then
+      echo "Missing local credential file: $source_file" >&2
+      exit 1
+    fi
+    cp "$source_file" "$target_file"
+    chmod 600 "$target_file"
+  done
+
+  echo "Embedded local credential files for private local app package." >&2
 fi
 
 if [[ -z "$SIGN_IDENTITY" ]]; then

@@ -397,7 +397,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 } catch is CancellationError {
                     return
                 } catch {
-                    textForInsertion = originalText
+                    textForInsertion = VoiceRewriteFallbackPolicy.fallbackText(for: originalText)
                 }
                 guard !Task.isCancelled else { return }
 

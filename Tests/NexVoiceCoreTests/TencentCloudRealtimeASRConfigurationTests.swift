@@ -113,3 +113,26 @@ import Testing
     #expect(credentials.secretID == "file-id")
     #expect(credentials.secretKey == "file-key")
 }
+
+@Test func tencentCredentialStoreLoadsBundledFileWhenEnvironmentAndUserFileAreMissing() throws {
+    let missingUserFile = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString)
+        .appendingPathExtension("json")
+    let bundledFile = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString)
+        .appendingPathExtension("json")
+    try Data("""
+    {"appID":"bundled-app","secretID":"bundled-id","secretKey":"bundled-key"}
+    """.utf8).write(to: bundledFile)
+    defer { try? FileManager.default.removeItem(at: bundledFile) }
+
+    let credentials = try TencentCloudASRCredentialStore.load(
+        environment: [:],
+        fileURL: missingUserFile,
+        bundledFileURL: bundledFile
+    )
+
+    #expect(credentials.appID == "bundled-app")
+    #expect(credentials.secretID == "bundled-id")
+    #expect(credentials.secretKey == "bundled-key")
+}
