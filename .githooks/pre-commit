@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${NEXVOICE_SKIP_VERSION_BUMP:-0}" == "1" ]]; then
+  echo "NexVoice pre-commit version bump skipped." >&2
+  exit 0
+fi
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+cd "$ROOT_DIR"
+
+VERSION_FILES=(
+  "Resources/NexVoiceHost/Info.plist"
+  "Resources/NexVoiceRewriteEval/Info.plist"
+  "Resources/NexVoiceRewriteEvalRunner/Info.plist"
+)
+
+is_version_file() {
+  local candidate="$1"
+  local version_file
+  for version_file in "${VERSION_FILES[@]}"; do
+    if [[ "$candidate" == "$version_file" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+has_iteration_change=0
+while IFS= read -r staged_file; do
+  if [[ -z "$staged_file" ]]; then
+    continue
+  fi
+  if ! is_version_file "$staged_file"; then
+    has_iteration_change=1
+    break
+  fi
+done < <(git diff --cached --name-only --diff-filter=ACMR)
+
+if [[ "$has_iteration_change" != "1" ]]; then
+  echo "NexVoice version bump skipped: no staged iteration changes." >&2
+  exit 0
+fi
+
+"$ROOT_DIR/scripts/bump_version.sh"
+git add "${VERSION_FILES[@]}"

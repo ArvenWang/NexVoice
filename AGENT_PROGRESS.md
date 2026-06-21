@@ -10,6 +10,7 @@
 - 当前主链路：腾讯云实时 ASR `16k_zh_en` -> DeepSeek `deepseek-v4-flash` 最终整理 -> 写入当前聚焦输入框。
 - 本地 SenseVoice Small 和 WhisperKit large-v3 保留为兜底和质量对照，不是当前默认主链路。
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
+- 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
 ## 已完成能力
 
@@ -43,6 +44,11 @@
 
 ## 本轮完成
 
+- 新增仓库内版本递增自动化：
+  - `scripts/bump_version.sh`：统一递增 `Resources/NexVoiceHost/Info.plist`、`Resources/NexVoiceRewriteEval/Info.plist`、`Resources/NexVoiceRewriteEvalRunner/Info.plist` 的 `CFBundleShortVersionString` 和 `CFBundleVersion`。
+  - `.githooks/pre-commit`：提交前检测 staged 内容，只要包含真实迭代改动，就自动执行版本递增并重新 stage 版本文件。
+  - `scripts/install_git_hooks.sh`：把仓库 hook 安装到本地 `.git/hooks/pre-commit`，避免依赖人工手动改版本号。
+  - 可用 `NEXVOICE_SKIP_VERSION_BUMP=1` 临时跳过自动递增，仅用于极特殊维护场景。
 - 看屏回复交互进一步简化：按住时只显示 `识别中`；如果检测到语音指令，显示 `识别到指令`；松开后直接进入 `AI 输入中`。
 - 修复 `识别到指令` 状态反复抖动：同一轮看屏回复里只允许从 `识别中` 切换到 `识别到指令` 一次，后续 partial 识别结果不会重复触发状态条动画。
 - 看屏回复分支不再调用普通语音输入的 `captionPanel.apply(event)`，因此不会展示实时识别文字、波形条或普通语音输入大框。
