@@ -278,6 +278,8 @@ final class VoiceCaptionPanelController {
         transcriptScrollView.hasHorizontalScroller = false
         transcriptScrollView.autohidesScrollers = true
         transcriptScrollView.scrollerStyle = .overlay
+        transcriptScrollView.horizontalScrollElasticity = .none
+        transcriptScrollView.verticalScrollElasticity = .automatic
         transcriptScrollView.scrollerInsets = NSEdgeInsets(
             top: 4,
             left: 0,
@@ -293,6 +295,7 @@ final class VoiceCaptionPanelController {
         applyTranscriptTextInsets(verticalInset: VoiceWaveformDisplayPolicy.transcriptTextInset)
         transcriptTextView.textContainer?.lineFragmentPadding = 0
         transcriptTextView.textContainer?.widthTracksTextView = true
+        transcriptTextView.textContainer?.heightTracksTextView = false
         transcriptTextView.textContainer?.containerSize = NSSize(
             width: VoiceWaveformDisplayPolicy.transcriptLayoutWidth,
             height: .greatestFiniteMagnitude
@@ -409,7 +412,7 @@ final class VoiceCaptionPanelController {
             width: VoiceWaveformDisplayPolicy.textContentWidth,
             height: max(textHeight, measuredHeight)
         )
-        transcriptTextView.scrollToEndOfDocument(nil)
+        scrollTranscriptVerticallyToEnd()
         let panelHeight = showsWaveformInTextPanel
             ? VoiceWaveformDisplayPolicy.expandedPanelHeight(for: measuredHeight)
             : VoiceWaveformDisplayPolicy.resultPanelHeight(for: measuredHeight)
@@ -446,6 +449,15 @@ final class VoiceCaptionPanelController {
             width: VoiceWaveformDisplayPolicy.transcriptTextInset,
             height: verticalInset
         )
+    }
+
+    private func scrollTranscriptVerticallyToEnd() {
+        let clipView = transcriptScrollView.contentView
+        let documentHeight = transcriptTextView.frame.height
+        let visibleHeight = clipView.bounds.height
+        let yOffset = max(0, documentHeight - visibleHeight)
+        clipView.scroll(to: NSPoint(x: 0, y: yOffset))
+        transcriptScrollView.reflectScrolledClipView(clipView)
     }
 
     private func updatePanelSize(to size: CGSize, animated: Bool = false) {

@@ -314,6 +314,8 @@ import Testing
     #expect(prompt.contains("新回复"))
     #expect(prompt.contains("不是复读、翻译、整理、改写或摘抄屏幕里的聊天记录"))
     #expect(prompt.contains("不要输出任何一条可见原文的重复或近似复述"))
+    #expect(prompt.contains("不能直接当成输出正文"))
+    #expect(prompt.contains("用户亲自要发送的新消息"))
     #expect(prompt.contains("用更强硬一点的语气回复第二句"))
     #expect(prompt.contains("不要把所有发言当成同一个人"))
     #expect(prompt.contains("只基于可见内容"))

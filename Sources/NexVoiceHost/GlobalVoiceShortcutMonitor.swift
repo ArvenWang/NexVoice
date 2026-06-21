@@ -14,6 +14,7 @@ final class GlobalVoiceShortcutMonitor {
     private var longPressWorkItem: DispatchWorkItem?
     private var onTrigger: (() -> Void)?
     private var onLongPress: (() -> Void)?
+    private var onLongPressEnded: (() -> Void)?
     private var onCancel: (() -> Void)?
 
     @discardableResult
@@ -21,12 +22,14 @@ final class GlobalVoiceShortcutMonitor {
         shortcut: VoiceShortcut,
         onTrigger: @escaping () -> Void,
         onLongPress: @escaping () -> Void,
+        onLongPressEnded: @escaping () -> Void,
         onCancel: @escaping () -> Void
     ) -> Bool {
         stop()
         self.shortcut = shortcut
         self.onTrigger = onTrigger
         self.onLongPress = onLongPress
+        self.onLongPressEnded = onLongPressEnded
         self.onCancel = onCancel
 
         globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
@@ -60,6 +63,7 @@ final class GlobalVoiceShortcutMonitor {
         removeMonitor(&localEventMonitor)
         onTrigger = nil
         onLongPress = nil
+        onLongPressEnded = nil
         onCancel = nil
         longPressWorkItem?.cancel()
         longPressWorkItem = nil
@@ -146,10 +150,13 @@ final class GlobalVoiceShortcutMonitor {
         longPressWorkItem?.cancel()
         longPressWorkItem = nil
         let shouldTriggerShortPress = isPressed && !didTriggerLongPress
+        let shouldEndLongPress = isPressed && didTriggerLongPress
         isPressed = false
         didTriggerLongPress = false
         if shouldTriggerShortPress {
             onTrigger?()
+        } else if shouldEndLongPress {
+            onLongPressEnded?()
         }
     }
 

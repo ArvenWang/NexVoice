@@ -42,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var selectedTextContextForCurrentSession: SelectedTextContext?
     private var rewriteContextForCurrentSession: VoiceRewriteContext?
     private var screenReplyCapturedContextForCurrentSession: ScreenReplyCapturedContext?
+    private var pendingScreenReplyVoiceInstruction: String?
     private var didInsertCurrentSession = false
     private var isCurrentSessionCancelled = false
     private var insertedTextPreview: String?
@@ -168,6 +169,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onLongPress: { [weak self] in
                 self?.handleShortcutLongPressed()
             },
+            onLongPressEnded: { [weak self] in
+                self?.handleShortcutLongPressEnded()
+            },
             onCancel: { [weak self] in
                 self?.cancelCurrentSessionFromEscape()
             }
@@ -286,11 +290,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         beginScreenReply()
     }
 
+    private func handleShortcutLongPressEnded() {
+        guard isScreenReplyInstructionSession else { return }
+        switch transcriptionService.state {
+        case .running:
+            stopTranscription()
+        case .finishing:
+            break
+        case .idle:
+            generateScreenReply(voiceInstruction: "")
+        }
+    }
+
     private func beginScreenReply() {
         targetApplicationForCurrentSession = NSWorkspace.shared.frontmostApplication
         selectedTextContextForCurrentSession = nil
         rewriteContextForCurrentSession = nil
         screenReplyCapturedContextForCurrentSession = nil
+        pendingScreenReplyVoiceInstruction = nil
         didInsertCurrentSession = false
         isCurrentSessionCancelled = false
         insertedTextPreview = nil
@@ -311,6 +328,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         rewriteContextForCurrentSession = rewriteContext
 
+        startScreenReplyInstructionCapture(
+            personalDictionary: personalDictionary,
+            rewriteContext: rewriteContext
+        )
+
         rewriteTask = Task { [weak self] in
             guard let self else { return }
             let capturedContext: ScreenReplyCapturedContext
@@ -328,14 +350,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard !Task.isCancelled else { return }
 
             await MainActor.run {
-                guard !self.isCurrentSessionCancelled else { return }
+                guard !self.isCurrentSessionCancelled,
+                      self.isScreenReplyInstructionSession else { return }
                 self.screenReplyCapturedContextForCurrentSession = capturedContext
-                self.isRewritingCurrentSession = false
                 self.rewriteTask = nil
-                self.startScreenReplyInstructionCapture(
-                    personalDictionary: personalDictionary,
-                    rewriteContext: rewriteContext
-                )
+                if let instruction = self.pendingScreenReplyVoiceInstruction {
+                    self.pendingScreenReplyVoiceInstruction = nil
+                    self.generateScreenReply(voiceInstruction: instruction)
+                } else {
+                    self.isRewritingCurrentSession = false
+                    self.statusItem?.button?.title = "NexVoice 看屏指令中"
+                    self.refreshMenuState()
+                }
             }
         }
     }
@@ -364,7 +390,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusItem?.button?.title = "NexVoice 看屏指令中"
             refreshMenuState()
         } catch {
-            finishScreenReplyWithError(error)
+            generateScreenReply(voiceInstruction: "")
         }
     }
 
@@ -373,6 +399,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         selectedTextContextForCurrentSession = nil
         rewriteContextForCurrentSession = nil
         screenReplyCapturedContextForCurrentSession = nil
+        pendingScreenReplyVoiceInstruction = nil
         didInsertCurrentSession = false
         isCurrentSessionCancelled = false
         insertedTextPreview = nil
@@ -612,9 +639,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func generateScreenReply(voiceInstruction: String) {
         guard !isCurrentSessionCancelled else { return }
-        guard isScreenReplyInstructionSession,
-              let capturedContext = screenReplyCapturedContextForCurrentSession else {
+        guard isScreenReplyInstructionSession else {
             finishScreenReplyWithError(ScreenReplyCaptureError.captureFailed)
+            return
+        }
+        let trimmedInstruction = voiceInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let capturedContext = screenReplyCapturedContextForCurrentSession else {
+            pendingScreenReplyVoiceInstruction = trimmedInstruction
+            isRewritingCurrentSession = true
+            captionPanel.showLoading("看屏中")
+            statusItem?.button?.title = "NexVoice 看屏中"
+            refreshMenuState()
             return
         }
         guard !didInsertCurrentSession else { return }
@@ -641,7 +676,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 reply = try await self.finalRewriteService.handleScreenReply(
                     visibleText: capturedContext.visibleText,
                     structuredMessages: capturedContext.structuredMessages,
-                    voiceInstruction: voiceInstruction,
+                    voiceInstruction: trimmedInstruction,
                     outputLanguage: outputLanguage,
                     style: rewriteStyle,
                     context: rewriteContext
@@ -702,6 +737,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func finishScreenReplyInstructionSession() {
         isScreenReplyInstructionSession = false
         screenReplyCapturedContextForCurrentSession = nil
+        pendingScreenReplyVoiceInstruction = nil
     }
 
     private func stopTranscription() {
@@ -727,6 +763,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         selectedTextContextForCurrentSession = nil
         rewriteContextForCurrentSession = nil
         screenReplyCapturedContextForCurrentSession = nil
+        pendingScreenReplyVoiceInstruction = nil
         targetApplicationForCurrentSession = nil
         isRewritingCurrentSession = false
         isScreenReplyInstructionSession = false
