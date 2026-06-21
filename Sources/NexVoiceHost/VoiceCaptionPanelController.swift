@@ -277,17 +277,27 @@ final class VoiceCaptionPanelController {
         transcriptScrollView.hasVerticalScroller = false
         transcriptScrollView.hasHorizontalScroller = false
         transcriptScrollView.autohidesScrollers = true
+        transcriptScrollView.scrollerStyle = .overlay
+        transcriptScrollView.scrollerInsets = NSEdgeInsets(
+            top: 4,
+            left: 0,
+            bottom: 4,
+            right: VoiceWaveformDisplayPolicy.floatingScrollerRightInset
+        )
         transcriptScrollView.drawsBackground = false
         transcriptScrollView.isHidden = true
 
         transcriptTextView.isEditable = false
         transcriptTextView.isSelectable = false
         transcriptTextView.drawsBackground = false
-        transcriptTextView.textContainerInset = NSSize(width: 0, height: 0)
+        transcriptTextView.textContainerInset = NSSize(
+            width: VoiceWaveformDisplayPolicy.transcriptTextInset,
+            height: 1
+        )
         transcriptTextView.textContainer?.lineFragmentPadding = 0
         transcriptTextView.textContainer?.widthTracksTextView = true
         transcriptTextView.textContainer?.containerSize = NSSize(
-            width: VoiceWaveformDisplayPolicy.textContentWidth,
+            width: VoiceWaveformDisplayPolicy.transcriptLayoutWidth,
             height: .greatestFiniteMagnitude
         )
         transcriptTextView.minSize = NSSize(width: VoiceWaveformDisplayPolicy.textContentWidth, height: 0)
@@ -383,8 +393,11 @@ final class VoiceCaptionPanelController {
         }
 
         let measuredHeight = measuredTextHeight(for: trimmed)
-        let textHeight = min(measuredHeight, VoiceWaveformDisplayPolicy.maximumTextHeight)
-        transcriptScrollView.hasVerticalScroller = measuredHeight > VoiceWaveformDisplayPolicy.maximumTextHeight
+        let maximumTextHeight = showsWaveformInTextPanel
+            ? VoiceWaveformDisplayPolicy.maximumTextHeight
+            : VoiceWaveformDisplayPolicy.maximumResultTextHeight
+        let textHeight = min(measuredHeight, maximumTextHeight)
+        transcriptScrollView.hasVerticalScroller = measuredHeight > maximumTextHeight
         textHeightConstraint?.constant = textHeight
         transcriptTextView.frame = NSRect(
             x: 0,
@@ -416,12 +429,12 @@ final class VoiceCaptionPanelController {
         )
         let rect = attributed.boundingRect(
             with: NSSize(
-                width: VoiceWaveformDisplayPolicy.textContentWidth,
+                width: VoiceWaveformDisplayPolicy.transcriptLayoutWidth,
                 height: .greatestFiniteMagnitude
             ),
             options: [.usesLineFragmentOrigin, .usesFontLeading]
         )
-        return ceil(rect.height) + 4
+        return ceil(rect.height) + 6
     }
 
     private func updatePanelSize(to size: CGSize, animated: Bool = false) {

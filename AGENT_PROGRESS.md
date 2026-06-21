@@ -15,6 +15,7 @@
 
 - 实时语音输入：麦克风采集、腾讯云实时识别、partial 草稿展示、final 后 AI 整理并写入输入框。
 - 底部语音浮层：紧凑波形、实时草稿、loading 状态、toast 状态提示，整体对齐当前波形条样式。
+- 文本浮层滚动：实时识别草稿和选中文本指令结果共用浮层布局；滚动条使用 overlay 方式，不再挤占正文宽度，长结果优先增高展示。
 - 输出语言：中文 / English 可独立选择。
 - 输出模式已收敛为 4 个：
   - `标准模式（默认）`：修正吞字、断词、重复、口头禅、明显错词和断句，严格贴合原意、事实、立场和语气强弱。
@@ -40,6 +41,18 @@
 
 ## 本轮完成
 
+- 修复用户截图中的严重浮层问题：选中文本后语音指令的翻译结果不再左右裁切，滚动条改为悬浮 overlay，不再挤压正文导致文字消失。
+- 同步修复实时识别文字框：识别草稿和结果框共用同一套文本容器宽度、正文内边距和滚动条安全区。
+- 提高最大展示高度：
+  - 实时识别浮层最大高度从 `128` 提到 `180`。
+  - 选中文本指令结果浮层最大高度提高到 `300`，尽量减少长翻译结果的滚动条。
+- 新增布局测试，防止最大高度和滚动条安全区被回退。
+- 本轮待重新构建带本机 API 配置的 DMG：
+  - 路径：`dist/NexVoice-20260621-text-panel-fix.dmg`
+  - SHA256：`0d6851c5d339b65230eaa372a8d5ea4be722ec958dc7563b0cb8d4ae30e6f203`
+
+## 上轮完成
+
 - 新增看屏自动回复第一版：长按快捷键进入 `看屏中` / `AI 回复中` 状态，当前窗口可见文字经 OCR 后交给 DeepSeek 生成回复，并写入当前聚焦输入框。
 - 新增屏幕录制权限菜单入口；未授权时会引导授权，不会静默失败。
 - 新增 `screen_reply` DeepSeek prompt，明确只基于可见内容、不要把多角色聊天当作同一人、输出风格跟随当前输出模式。
@@ -61,13 +74,13 @@
 
 ## 验证情况
 
-- `swift test --disable-sandbox --quiet`：通过 121 个测试。
+- `swift test --disable-sandbox --quiet`：通过 122 个测试。
 - `git diff --check`：通过。
 - `CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceApp`：通过。
 - `./scripts/build_app.sh release --embed-local-keys`：通过，确认本机 DeepSeek / 腾讯云 ASR 配置已嵌入 App 资源目录。
 - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app`：通过。
 - `plutil -lint dist/NexVoice.app/Contents/Info.plist`：通过。
-- `hdiutil attach -readonly -nobrowse dist/NexVoice-20260621-screen-reply.dmg`：通过，根目录包含 `NexVoice.app` 和 `Applications` 快捷入口。
+- `hdiutil attach -readonly -nobrowse dist/NexVoice-20260621-text-panel-fix.dmg`：通过，根目录包含 `NexVoice.app` 和 `Applications` 快捷入口。
 
 ## 待办与风险
 

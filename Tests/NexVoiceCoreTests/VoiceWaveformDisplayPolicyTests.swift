@@ -7,7 +7,7 @@ import Testing
     #expect(VoiceWaveformDisplayPolicy.compactPanelSize == CGSize(width: 92, height: 44))
     #expect(VoiceWaveformDisplayPolicy.loadingPanelSize == CGSize(width: 156, height: 44))
     #expect(VoiceWaveformDisplayPolicy.statusPanelSize == CGSize(width: 188, height: 44))
-    #expect(VoiceWaveformDisplayPolicy.stageSize == CGSize(width: 420, height: 128))
+    #expect(VoiceWaveformDisplayPolicy.stageSize == CGSize(width: 420, height: 300))
     #expect(VoiceWaveformDisplayPolicy.panelSize == CGSize(width: 92, height: 44))
     #expect(VoiceWaveformDisplayPolicy.bottomOffset == 8)
     #expect(VoiceWaveformDisplayPolicy.screenEdgeInset == 8)
@@ -16,8 +16,17 @@ import Testing
 @Test func waveformDisplayPolicyGrowsAndCapsTextAreaHeight() {
     #expect(VoiceWaveformDisplayPolicy.expandedPanelWidth == 420)
     #expect(VoiceWaveformDisplayPolicy.expandedPanelHeight(for: 12) == 80)
-    #expect(VoiceWaveformDisplayPolicy.expandedPanelHeight(for: 90) == VoiceWaveformDisplayPolicy.maximumPanelHeight)
+    #expect(VoiceWaveformDisplayPolicy.expandedPanelHeight(for: 90) == 142)
     #expect(VoiceWaveformDisplayPolicy.expandedPanelHeight(for: 400) == VoiceWaveformDisplayPolicy.maximumPanelHeight)
+}
+
+@Test func waveformDisplayPolicyGivesContextualResultsMoreRoom() {
+    #expect(VoiceWaveformDisplayPolicy.maximumPanelHeight == 180)
+    #expect(VoiceWaveformDisplayPolicy.maximumResultPanelHeight == 300)
+    #expect(VoiceWaveformDisplayPolicy.maximumResultTextHeight > VoiceWaveformDisplayPolicy.maximumTextHeight)
+    #expect(VoiceWaveformDisplayPolicy.resultPanelHeight(for: 400) == VoiceWaveformDisplayPolicy.maximumResultPanelHeight)
+    #expect(VoiceWaveformDisplayPolicy.floatingScrollerGutter == 24)
+    #expect(VoiceWaveformDisplayPolicy.transcriptLayoutWidth < VoiceWaveformDisplayPolicy.textContentWidth)
 }
 
 @Test func waveformDisplayPolicyUsesNexHubStyleFiveBars() {

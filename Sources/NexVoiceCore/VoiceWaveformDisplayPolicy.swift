@@ -7,9 +7,13 @@ public enum VoiceWaveformDisplayPolicy {
     public static let loadingPanelSize = CGSize(width: 156, height: 44)
     public static let statusPanelSize = CGSize(width: 188, height: 44)
     public static let expandedPanelWidth: CGFloat = 420
-    public static let maximumPanelHeight: CGFloat = 128
-    public static let stageSize = CGSize(width: expandedPanelWidth, height: maximumPanelHeight)
+    public static let maximumPanelHeight: CGFloat = 180
+    public static let maximumResultPanelHeight: CGFloat = 300
+    public static let stageSize = CGSize(width: expandedPanelWidth, height: maximumResultPanelHeight)
     public static let horizontalPadding: CGFloat = 14
+    public static let transcriptTextInset: CGFloat = 6
+    public static let floatingScrollerGutter: CGFloat = 24
+    public static let floatingScrollerRightInset: CGFloat = 8
     public static let topPadding: CGFloat = 8
     public static let textWaveformSpacing: CGFloat = 8
     public static let bottomPadding: CGFloat = 8
@@ -25,9 +29,16 @@ public enum VoiceWaveformDisplayPolicy {
     public static let textFadeDuration: TimeInterval = 0.2
     public static let wavePointCount = 5
     public static let textContentWidth = expandedPanelWidth - horizontalPadding * 2
+    public static let transcriptLayoutWidth = textContentWidth
+        - transcriptTextInset * 2
+        - floatingScrollerGutter
 
     public static var maximumTextHeight: CGFloat {
         maximumPanelHeight - topPadding - textWaveformSpacing - waveformSize.height - bottomPadding
+    }
+
+    public static var maximumResultTextHeight: CGFloat {
+        maximumResultPanelHeight - topPadding - bottomPadding
     }
 
     public static func expandedPanelHeight(for measuredTextHeight: CGFloat) -> CGFloat {
@@ -36,7 +47,7 @@ public enum VoiceWaveformDisplayPolicy {
     }
 
     public static func resultPanelHeight(for measuredTextHeight: CGFloat) -> CGFloat {
-        let textHeight = clamp(measuredTextHeight, min: 28, max: maximumTextHeight)
+        let textHeight = clamp(measuredTextHeight, min: 28, max: maximumResultTextHeight)
         return topPadding + textHeight + bottomPadding
     }
 
