@@ -293,6 +293,31 @@ import Testing
     #expect(prompt.contains("只输出最终结果"))
 }
 
+@Test func screenReplyPromptUsesVisibleContextAndCurrentStyle() {
+    let prompt = VoiceRewritePromptPolicy.screenReplyPrompt(
+        visibleText: """
+        A：这个方案今天能定吗？
+        我：还需要再确认风险。
+        """,
+        structuredMessages: """
+        对方：这个方案今天能定吗？
+        我：还需要再确认风险。
+        """,
+        outputLanguage: .simplifiedChinese,
+        style: .amplifiedSpokesperson,
+        context: VoiceRewriteContext(sourceApplicationName: "WeChat")
+    )
+
+    #expect(prompt.contains("看屏回复模式"))
+    #expect(prompt.contains("当前前台应用可见区域"))
+    #expect(prompt.contains("不要把所有发言当成同一个人"))
+    #expect(prompt.contains("只基于可见内容"))
+    #expect(prompt.contains("强化嘴替"))
+    #expect(prompt.contains("允许使用脏话"))
+    #expect(prompt.contains("WeChat"))
+    #expect(prompt.contains("对方：这个方案今天能定吗？"))
+}
+
 @Test func rewriteOutputSanitizerRemovesMarkdownDecorationForPlainTextInputs() {
     let output = VoiceRewriteOutputSanitizer.sanitize("""
     # 结论

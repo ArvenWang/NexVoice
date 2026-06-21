@@ -15,9 +15,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var personalDictionaryMenuItem: NSMenuItem?
     private var rewriteEvaluationMenuItem: NSMenuItem?
     private var accessibilityMenuItem: NSMenuItem?
+    private var screenRecordingMenuItem: NSMenuItem?
     private let permissionService = MicrophonePermissionService()
     private let transcriptionService = TencentCloudRealtimeTranscriptionService()
     private let finalRewriteService = DeepSeekFinalRewriteService()
+    private let screenReplyCaptureService = ScreenReplyContextCaptureService()
     private let captionPanel = VoiceCaptionPanelController()
     private let textInserter = FocusedTextInserter()
     private lazy var dictionaryLearningMonitor = VoiceDictionaryAutoLearningMonitor(
@@ -85,6 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let personalDictionaryItem = NSMenuItem(title: "个人词库...", action: #selector(openPersonalDictionary), keyEquivalent: "")
         let rewriteEvaluationItem = NSMenuItem(title: "运行 DeepSeek 评测", action: #selector(runRewriteEvaluation), keyEquivalent: "")
         let accessibilityItem = NSMenuItem(title: VoicePermissionGuidance.accessibility.actionTitle, action: #selector(openAccessibilitySettings), keyEquivalent: "")
+        let screenRecordingItem = NSMenuItem(title: "申请屏幕录制权限", action: #selector(openScreenRecordingSettings), keyEquivalent: "")
         let localASRItem = NSMenuItem(title: "ASR：腾讯云实时 ASR（中英自动）", action: nil, keyEquivalent: "")
         let outputStyleMenu = NSMenu()
 
@@ -106,6 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "申请麦克风权限", action: #selector(requestMicrophonePermission), keyEquivalent: ""))
         menu.addItem(accessibilityItem)
+        menu.addItem(screenRecordingItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "退出 NexVoice", action: #selector(quit), keyEquivalent: "q"))
         menu.items.forEach { $0.target = self }
@@ -119,6 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         personalDictionaryMenuItem = personalDictionaryItem
         rewriteEvaluationMenuItem = rewriteEvaluationItem
         accessibilityMenuItem = accessibilityItem
+        screenRecordingMenuItem = screenRecordingItem
 
         item.menu = menu
         statusItem = item
@@ -156,6 +161,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             shortcut: voiceShortcut,
             onTrigger: { [weak self] in
                 self?.handleShortcutTriggered()
+            },
+            onLongPress: { [weak self] in
+                self?.handleShortcutLongPressed()
             },
             onCancel: { [weak self] in
                 self?.cancelCurrentSessionFromEscape()
@@ -233,6 +241,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         schedulePermissionRefresh()
     }
 
+    @objc private func openScreenRecordingSettings() {
+        ScreenReplyContextCaptureService.requestScreenRecordingPermission()
+        captionPanel.showStatus("请允许屏幕录制", isError: false, autoHideDelay: 1.8)
+        schedulePermissionRefresh()
+    }
+
     @objc private func requestMicrophonePermission() {
         switch permissionService.authorizationStatus() {
         case .authorized:
@@ -256,6 +270,91 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         beginSessionTask = Task { @MainActor [weak self] in
             guard let self else { return }
             await self.beginTranscriptionAfterSelectionCapture()
+        }
+    }
+
+    private func handleShortcutLongPressed() {
+        guard transcriptionService.state == .idle,
+              beginSessionTask == nil,
+              rewriteTask == nil,
+              !isRewritingCurrentSession else {
+            return
+        }
+        beginScreenReply()
+    }
+
+    private func beginScreenReply() {
+        targetApplicationForCurrentSession = NSWorkspace.shared.frontmostApplication
+        selectedTextContextForCurrentSession = nil
+        rewriteContextForCurrentSession = nil
+        didInsertCurrentSession = true
+        isCurrentSessionCancelled = false
+        insertedTextPreview = nil
+        isRewritingCurrentSession = true
+        dictionaryLearningMonitor.cancel()
+        rewriteTask?.cancel()
+        captionPanel.showLoading("看屏中")
+        statusItem?.button?.title = "NexVoice 看屏中"
+        refreshMenuState()
+
+        let targetApplication = targetApplicationForCurrentSession
+        let outputLanguage = selectedOutputLanguage
+        let rewriteStyle = selectedRewriteStyle
+        let personalDictionary = VoicePersonalDictionaryStore.load()
+        let rewriteContext = textInserter.rewriteContext(
+            in: targetApplication,
+            selectedTextMode: false,
+            personalDictionary: personalDictionary
+        )
+        rewriteContextForCurrentSession = rewriteContext
+
+        rewriteTask = Task { [weak self] in
+            guard let self else { return }
+            let capturedContext: ScreenReplyCapturedContext
+            do {
+                capturedContext = try await self.screenReplyCaptureService.capture(from: targetApplication)
+            } catch is CancellationError {
+                return
+            } catch {
+                await MainActor.run {
+                    guard !self.isCurrentSessionCancelled else { return }
+                    self.finishScreenReplyWithError(error)
+                }
+                return
+            }
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                guard !self.isCurrentSessionCancelled else { return }
+                self.captionPanel.showLoading("AI 回复中")
+                self.statusItem?.button?.title = "NexVoice 回复中"
+                self.refreshMenuState()
+            }
+
+            let reply: String
+            do {
+                reply = try await self.finalRewriteService.handleScreenReply(
+                    visibleText: capturedContext.visibleText,
+                    structuredMessages: capturedContext.structuredMessages,
+                    outputLanguage: outputLanguage,
+                    style: rewriteStyle,
+                    context: rewriteContext
+                )
+            } catch is CancellationError {
+                return
+            } catch {
+                await MainActor.run {
+                    guard !self.isCurrentSessionCancelled else { return }
+                    self.finishScreenReplyWithError(error)
+                }
+                return
+            }
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                guard !self.isCurrentSessionCancelled else { return }
+                self.insertScreenReply(reply, into: targetApplication)
+            }
         }
     }
 
@@ -488,6 +587,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func insertScreenReply(_ reply: String, into targetApplication: NSRunningApplication?) {
+        insertedTextPreview = reply
+        isRewritingCurrentSession = false
+        rewriteTask = nil
+        rewriteContextForCurrentSession = nil
+        do {
+            try textInserter.insert(reply, into: targetApplication)
+            captionPanel.showInsertedText(reply)
+            statusItem?.button?.title = "NexVoice"
+            refreshMenuState()
+        } catch {
+            finishScreenReplyWithError(error)
+        }
+    }
+
+    private func finishScreenReplyWithError(_ error: Error) {
+        isRewritingCurrentSession = false
+        rewriteTask = nil
+        rewriteContextForCurrentSession = nil
+        let message: String
+        if case ScreenReplyCaptureError.screenRecordingPermissionRequired = error {
+            ScreenReplyContextCaptureService.requestScreenRecordingPermission()
+            message = "需要屏幕录制权限"
+        } else if case ScreenReplyCaptureError.noRecognizedText = error {
+            message = "未识别到文字"
+        } else {
+            message = "看屏回复失败"
+        }
+        captionPanel.showStatus(message, isError: true, autoHideDelay: 1.6)
+        statusItem?.button?.title = "NexVoice 出错"
+        refreshMenuState()
+    }
+
     private func stopTranscription() {
         captionPanel.showLoading("正在处理")
         transcriptionService.finish()
@@ -594,13 +726,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         chineseOutputMenuItem?.state = selectedOutputLanguage == .simplifiedChinese ? .on : .off
         englishOutputMenuItem?.state = selectedOutputLanguage == .english ? .on : .off
-        chineseOutputMenuItem?.isEnabled = transcriptionService.state == .idle
-        englishOutputMenuItem?.isEnabled = transcriptionService.state == .idle
+        let canChangeMode = transcriptionService.state == .idle && !isRewritingCurrentSession
+        chineseOutputMenuItem?.isEnabled = canChangeMode
+        englishOutputMenuItem?.isEnabled = canChangeMode
         outputStyleMenuItem?.title = "输出模式：\(selectedRewriteStyle.menuTitle)"
-        outputStyleMenuItem?.isEnabled = transcriptionService.state == .idle
+        outputStyleMenuItem?.isEnabled = canChangeMode
         for (style, item) in outputStyleMenuItems {
             item.state = style == selectedRewriteStyle ? .on : .off
-            item.isEnabled = transcriptionService.state == .idle
+            item.isEnabled = canChangeMode
         }
         rewriteEvaluationMenuItem?.isEnabled = transcriptionService.state == .idle && rewriteTask == nil
         personalDictionaryMenuItem?.isEnabled = true
@@ -608,6 +741,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         accessibilityMenuItem?.title = textInserter.canPostKeyboardEvents
             ? "辅助功能权限已允许"
             : VoicePermissionGuidance.accessibility.actionTitle
+        screenRecordingMenuItem?.title = SystemPermissionRequester.hasScreenRecordingPermission
+            ? "屏幕录制权限已允许"
+            : "申请屏幕录制权限"
         if activeDictionaryLearningTasks > 0, transcriptionService.state == .idle, !isRewritingCurrentSession {
             statusItem?.button?.title = "NexVoice 学习中"
         }

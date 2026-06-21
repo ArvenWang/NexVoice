@@ -167,6 +167,26 @@ public enum VoiceRewritePromptPolicy {
         )
     }
 
+    public static func screenReplyPromptPlan(
+        visibleText: String,
+        structuredMessages: String,
+        outputLanguage: VoiceOutputLanguage,
+        style: VoiceRewriteStyle = .default,
+        context: VoiceRewriteContext? = nil
+    ) -> VoiceRewritePromptPlan {
+        VoiceRewritePromptPlan(
+            mode: .full,
+            systemPrompt: systemPrompt,
+            userPrompt: screenReplyPrompt(
+                visibleText: visibleText,
+                structuredMessages: structuredMessages,
+                outputLanguage: outputLanguage,
+                style: style,
+                context: context
+            )
+        )
+    }
+
     public static func userPrompt(
         for text: String,
         outputLanguage: VoiceOutputLanguage,
@@ -246,6 +266,46 @@ public enum VoiceRewritePromptPolicy {
 
         用户语音指令：
         \(instruction.trimmingCharacters(in: .whitespacesAndNewlines))
+        """
+    }
+
+    public static func screenReplyPrompt(
+        visibleText: String,
+        structuredMessages: String,
+        outputLanguage: VoiceOutputLanguage,
+        style: VoiceRewriteStyle = .default,
+        context: VoiceRewriteContext? = nil
+    ) -> String {
+        let languageInstruction: String
+        switch outputLanguage {
+        case .simplifiedChinese:
+            languageInstruction = "优先简体中文；必要时保留英文术语、代码、品牌、产品名和专名。"
+        case .english:
+            languageInstruction = "Use natural American English unless the conversation context clearly calls for another language."
+        }
+        return """
+        看屏回复模式：下面是当前前台应用可见区域 OCR 出来的文字。请根据可见上下文，替用户生成一条可以直接填入当前输入框的回复。
+
+        重要规则：
+        - 只输出最终回复，不解释、不总结、不复述规则。
+        - 不要把所有发言当成同一个人；如果结构化消息里有“我 / 对方 / 未知”，请据此判断对话关系。
+        - 只基于可见内容回复；不要假装看到了屏幕外、滚动上方或历史聊天记录。
+        - 如果 OCR 内容不足以判断上下文，输出一条自然的追问或谨慎回复，不要编造事实。
+        - 输出风格必须遵循当前输出模式。
+
+        输出语言：
+        \(languageInstruction)
+
+        输出模式：
+        \(style.promptInstruction)
+
+        \(context?.promptBlock ?? "当前上下文：未知")
+
+        结构化可见消息：
+        \(structuredMessages.trimmingCharacters(in: .whitespacesAndNewlines))
+
+        OCR 原始可见文字：
+        \(visibleText.trimmingCharacters(in: .whitespacesAndNewlines))
         """
     }
 }

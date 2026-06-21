@@ -97,6 +97,39 @@ final class DeepSeekFinalRewriteService: Sendable {
         )
     }
 
+    func handleScreenReply(
+        visibleText: String,
+        structuredMessages: String,
+        outputLanguage: VoiceOutputLanguage,
+        style: VoiceRewriteStyle = .default,
+        context: VoiceRewriteContext = VoiceRewriteContext()
+    ) async throws -> String {
+        let visibleText = visibleText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let structuredMessages = structuredMessages.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !visibleText.isEmpty || !structuredMessages.isEmpty else {
+            throw DeepSeekFinalRewriteError.emptyRewrite
+        }
+        let promptPlan = VoiceRewritePromptPolicy.screenReplyPromptPlan(
+            visibleText: visibleText,
+            structuredMessages: structuredMessages,
+            outputLanguage: outputLanguage,
+            style: style,
+            context: context
+        )
+
+        return try await complete(
+            promptPlan: promptPlan,
+            operation: "screen_reply",
+            outputLanguage: outputLanguage,
+            style: style,
+            selectedTextCharacters: nil,
+            instructionCharacters: max(visibleText.count, structuredMessages.count),
+            context: context,
+            temperature: style.rewriteTemperature,
+            sourceText: nil
+        )
+    }
+
     private func complete(
         promptPlan: VoiceRewritePromptPlan,
         operation: String,
@@ -111,6 +144,7 @@ final class DeepSeekFinalRewriteService: Sendable {
         let requestID = UUID().uuidString
         let startedAt = Date()
         let userPrompt = promptPlan.userPrompt
+        let diagnosticPrompt = diagnosticPromptPreview(for: operation, prompt: userPrompt)
         let configuration: DeepSeekFinalRewriteConfiguration
         do {
             configuration = try configurationLoader()
@@ -125,7 +159,7 @@ final class DeepSeekFinalRewriteService: Sendable {
                 selectedTextCharacters: selectedTextCharacters,
                 instructionCharacters: instructionCharacters,
                 context: context,
-                prompt: userPrompt,
+                prompt: diagnosticPrompt,
                 error: error,
                 startedAt: startedAt
             )
@@ -160,7 +194,7 @@ final class DeepSeekFinalRewriteService: Sendable {
                 selectedTextCharacters: selectedTextCharacters,
                 instructionCharacters: instructionCharacters,
                 contextSummary: context.diagnosticsSummary,
-                promptPreview: userPrompt
+                promptPreview: diagnosticPrompt
             )
         )
 
@@ -178,7 +212,7 @@ final class DeepSeekFinalRewriteService: Sendable {
                 selectedTextCharacters: selectedTextCharacters,
                 instructionCharacters: instructionCharacters,
                 context: context,
-                prompt: userPrompt,
+                prompt: diagnosticPrompt,
                 error: DeepSeekFinalRewriteError.missingAPIKey,
                 startedAt: startedAt
             )
@@ -218,7 +252,7 @@ final class DeepSeekFinalRewriteService: Sendable {
                 selectedTextCharacters: selectedTextCharacters,
                 instructionCharacters: instructionCharacters,
                 context: context,
-                prompt: userPrompt,
+                prompt: diagnosticPrompt,
                 error: error,
                 startedAt: startedAt
             )
@@ -243,7 +277,7 @@ final class DeepSeekFinalRewriteService: Sendable {
                 selectedTextCharacters: selectedTextCharacters,
                 instructionCharacters: instructionCharacters,
                 context: context,
-                prompt: userPrompt,
+                prompt: diagnosticPrompt,
                 error: error,
                 startedAt: startedAt
             )
@@ -263,7 +297,7 @@ final class DeepSeekFinalRewriteService: Sendable {
                 selectedTextCharacters: selectedTextCharacters,
                 instructionCharacters: instructionCharacters,
                 context: context,
-                prompt: userPrompt,
+                prompt: diagnosticPrompt,
                 error: DeepSeekFinalRewriteError.invalidResponse,
                 startedAt: startedAt
             )
@@ -284,7 +318,7 @@ final class DeepSeekFinalRewriteService: Sendable {
                 selectedTextCharacters: selectedTextCharacters,
                 instructionCharacters: instructionCharacters,
                 context: context,
-                prompt: userPrompt,
+                prompt: diagnosticPrompt,
                 error: DeepSeekFinalRewriteError.httpError(httpResponse.statusCode, message),
                 startedAt: startedAt,
                 httpStatus: httpResponse.statusCode,
@@ -310,7 +344,7 @@ final class DeepSeekFinalRewriteService: Sendable {
                 selectedTextCharacters: selectedTextCharacters,
                 instructionCharacters: instructionCharacters,
                 context: context,
-                prompt: userPrompt,
+                prompt: diagnosticPrompt,
                 error: error,
                 startedAt: startedAt,
                 httpStatus: httpResponse.statusCode,
@@ -335,7 +369,7 @@ final class DeepSeekFinalRewriteService: Sendable {
                 selectedTextCharacters: selectedTextCharacters,
                 instructionCharacters: instructionCharacters,
                 context: context,
-                prompt: userPrompt,
+                prompt: diagnosticPrompt,
                 error: DeepSeekFinalRewriteError.emptyRewrite,
                 startedAt: startedAt,
                 httpStatus: httpResponse.statusCode,
@@ -358,7 +392,7 @@ final class DeepSeekFinalRewriteService: Sendable {
                 selectedTextCharacters: selectedTextCharacters,
                 instructionCharacters: instructionCharacters,
                 context: context,
-                prompt: userPrompt,
+                prompt: diagnosticPrompt,
                 error: DeepSeekFinalRewriteError.emptyRewrite,
                 startedAt: startedAt,
                 httpStatus: httpResponse.statusCode,
@@ -398,7 +432,7 @@ final class DeepSeekFinalRewriteService: Sendable {
                     instructionCharacters: instructionCharacters,
                     contextSummary: context.diagnosticsSummary,
                     outputCharacters: fallback.count,
-                    promptPreview: userPrompt,
+                    promptPreview: diagnosticPrompt,
                     outputPreview: fallback,
                     responseBodyPreview: sanitizedRewrite
                 )
@@ -435,7 +469,7 @@ final class DeepSeekFinalRewriteService: Sendable {
                 instructionCharacters: instructionCharacters,
                 contextSummary: context.diagnosticsSummary,
                 outputCharacters: protectedRewrite.count,
-                promptPreview: userPrompt,
+                promptPreview: diagnosticPrompt,
                 outputPreview: protectedRewrite,
                 responseBodyPreview: qualityIssue ?? (protectedRewrite == rewritten ? nil : rewritten)
             )
@@ -490,6 +524,11 @@ final class DeepSeekFinalRewriteService: Sendable {
 
     private static func milliseconds(since startDate: Date) -> Int {
         Int(Date().timeIntervalSince(startDate) * 1000)
+    }
+
+    private func diagnosticPromptPreview(for operation: String, prompt: String) -> String {
+        guard operation == "screen_reply" else { return prompt }
+        return "screen_reply prompt redacted; characters=\(prompt.count)"
     }
 }
 

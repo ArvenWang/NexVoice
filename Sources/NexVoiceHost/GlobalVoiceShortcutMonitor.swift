@@ -10,18 +10,23 @@ final class GlobalVoiceShortcutMonitor {
     private var shortcut: VoiceShortcut = .default
     private var isPressed = false
     private var isCancelPressed = false
+    private var didTriggerLongPress = false
+    private var longPressWorkItem: DispatchWorkItem?
     private var onTrigger: (() -> Void)?
+    private var onLongPress: (() -> Void)?
     private var onCancel: (() -> Void)?
 
     @discardableResult
     func start(
         shortcut: VoiceShortcut,
         onTrigger: @escaping () -> Void,
+        onLongPress: @escaping () -> Void,
         onCancel: @escaping () -> Void
     ) -> Bool {
         stop()
         self.shortcut = shortcut
         self.onTrigger = onTrigger
+        self.onLongPress = onLongPress
         self.onCancel = onCancel
 
         globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
@@ -54,8 +59,12 @@ final class GlobalVoiceShortcutMonitor {
         removeMonitor(&globalFlagsMonitor)
         removeMonitor(&localEventMonitor)
         onTrigger = nil
+        onLongPress = nil
         onCancel = nil
+        longPressWorkItem?.cancel()
+        longPressWorkItem = nil
         isPressed = false
+        didTriggerLongPress = false
         isCancelPressed = false
     }
 
@@ -91,8 +100,7 @@ final class GlobalVoiceShortcutMonitor {
         ), !isPressed else {
             return
         }
-        isPressed = true
-        onTrigger?()
+        beginShortcutPress()
     }
 
     private func handleKeyUp(_ event: NSEvent) {
@@ -107,16 +115,41 @@ final class GlobalVoiceShortcutMonitor {
         ) else {
             return
         }
-        isPressed = false
+        endShortcutPress()
     }
 
     private func handleFlagsChanged(_ event: NSEvent) {
         let flags = Self.cgFlags(from: event.modifierFlags)
         if shortcut.matchesModifierKeyPress(keyCode: event.keyCode, flags: flags), !isPressed {
-            isPressed = true
-            onTrigger?()
+            beginShortcutPress()
         } else if shortcut.matchesModifierKeyRelease(keyCode: event.keyCode, flags: flags) {
-            isPressed = false
+            endShortcutPress()
+        }
+    }
+
+    private func beginShortcutPress() {
+        isPressed = true
+        didTriggerLongPress = false
+        longPressWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, self.isPressed, !self.didTriggerLongPress else { return }
+                self.didTriggerLongPress = true
+                self.onLongPress?()
+            }
+        }
+        longPressWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.longPressThreshold, execute: workItem)
+    }
+
+    private func endShortcutPress() {
+        longPressWorkItem?.cancel()
+        longPressWorkItem = nil
+        let shouldTriggerShortPress = isPressed && !didTriggerLongPress
+        isPressed = false
+        didTriggerLongPress = false
+        if shouldTriggerShortPress {
+            onTrigger?()
         }
     }
 
@@ -131,6 +164,7 @@ final class GlobalVoiceShortcutMonitor {
     }
 
     private static let escapeKeyCode: UInt16 = 53
+    private static let longPressThreshold: TimeInterval = 0.55
 
     private static func isEscapeCancel(_ event: NSEvent) -> Bool {
         guard event.keyCode == escapeKeyCode else { return false }

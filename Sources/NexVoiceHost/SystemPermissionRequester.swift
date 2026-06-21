@@ -7,6 +7,10 @@ enum SystemPermissionRequester {
         AXIsProcessTrusted()
     }
 
+    static var hasScreenRecordingPermission: Bool {
+        CGPreflightScreenCaptureAccess()
+    }
+
     @discardableResult
     static func requestAccessibilityPermission(prompt: Bool = true) -> Bool {
         let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
@@ -18,6 +22,18 @@ enum SystemPermissionRequester {
         openFirstAvailableURL([
             "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
             "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility"
+        ])
+    }
+
+    @discardableResult
+    static func requestScreenRecordingPermission() -> Bool {
+        CGRequestScreenCaptureAccess()
+    }
+
+    static func openScreenRecordingSettings() {
+        openFirstAvailableURL([
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture"
         ])
     }
 

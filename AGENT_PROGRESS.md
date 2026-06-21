@@ -6,7 +6,7 @@
 
 - 当前工作目录：`/Users/nefish/Desktop/Coding/NexVoice`。
 - 项目形态：SwiftPM macOS 菜单栏 App，核心模块为 `NexVoiceCore`，宿主为 `NexVoiceHost`。
-- 默认入口：右 Alt 开始语音输入，再按一次结束；ESC 可取消录音、等待 final 或 AI 改写中的会话。
+- 默认入口：短按右 Alt 开始语音输入，再按一次结束；长按右 Alt 约 0.55 秒进入看屏自动回复；ESC 可取消录音、等待 final、AI 改写或看屏回复中的会话。
 - 当前主链路：腾讯云实时 ASR `16k_zh_en` -> DeepSeek `deepseek-v4-flash` 最终整理 -> 写入当前聚焦输入框。
 - 本地 SenseVoice Small 和 WhisperKit large-v3 保留为兜底和质量对照，不是当前默认主链路。
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
@@ -31,56 +31,55 @@
   - 支持动态场景权重，腾讯云 ASR 热词会按当前 App / bundle / 场景排序。
   - 菜单提供 `个人词库...`，可查看、刷新和删除词条。
   - 学习成功使用底部 toast，不再弹阻塞确认框。
+- 看屏自动回复：
+  - 长按默认右 Alt 触发，不进入录音。
+  - 读取当前前台应用最大可见窗口，使用 Apple Vision 本地 OCR 提取可见文字。
+  - 按文字位置粗略生成 `我 / 对方 / 未知` 结构，交给 DeepSeek 生成一条回复。
+  - 回复遵循当前输出语言和四个输出模式，最终写入当前输入框，但不自动发送。
+  - 该模式只基于屏幕可见内容，不滚动、不读取屏幕外历史；`screen_reply` 诊断日志不保存 OCR 全文。
 
 ## 本轮完成
 
-- 按用户反馈重写 `强化嘴替` 的 prompt：从温和的“更有张力”改成真正的情绪放大模式；用户愤怒时输出应更狠、更锋利、更不客气，并允许脏话和攻击性表达。
-- `强化嘴替` temperature 从 `0.75` 提高到 `0.95`，并将评测样本改为愤怒表达场景。
-- 真实 DeepSeek 评测确认强化模式已明显升温：样本输出出现 `他妈`、`受够`、`捅了篓子`、`不负责任到家` 等更强表达；报告路径为 `eval_reports/deepseek-rewrite-eval-amplified-real.md`。
-- 已重新构建带本机 API 配置的强化模式版 DMG：
-  - 路径：`dist/NexVoice-20260621-amplified.dmg`
-  - SHA256：`396c914acde7af903a39e71cef1b9b0fd01d7516c9186a275a34cfe8f6534a49`
-  - DMG 已挂载检查，根目录包含 `NexVoice.app` 和 `Applications` 快捷入口。
-- 重写四个输出模式的 prompt，并接入菜单、DeepSeek prompt、temperature、评测样本和单测。
+- 新增看屏自动回复第一版：长按快捷键进入 `看屏中` / `AI 回复中` 状态，当前窗口可见文字经 OCR 后交给 DeepSeek 生成回复，并写入当前聚焦输入框。
+- 新增屏幕录制权限菜单入口；未授权时会引导授权，不会静默失败。
+- 新增 `screen_reply` DeepSeek prompt，明确只基于可见内容、不要把多角色聊天当作同一人、输出风格跟随当前输出模式。
+- 调整快捷键逻辑：短按仍控制语音输入开始/结束，长按触发看屏回复。
+- 保护隐私日志：看屏回复会把真实 OCR 内容发给 DeepSeek 生成回复，但本地 DeepSeek 诊断日志只保留 prompt 字符数，不保存 OCR 全文。
 - 同步更新：
-  - `Sources/NexVoiceCore/VoiceRewriteStyle.swift`
+  - `Sources/NexVoiceHost/GlobalVoiceShortcutMonitor.swift`
+  - `Sources/NexVoiceHost/ScreenReplyContextCaptureService.swift`
+  - `Sources/NexVoiceHost/SystemPermissionRequester.swift`
+  - `Sources/NexVoiceHost/DeepSeekFinalRewriteService.swift`
   - `Sources/NexVoiceCore/DeepSeekFinalRewriteConfiguration.swift`
-  - `Sources/NexVoiceHost/VoiceRewriteEvaluationRunner.swift`
-  - `Sources/NexVoiceRewriteEval/main.swift`
+  - `Sources/NexVoiceHost/main.swift`
   - `README.md`
   - `docs/local_acceptance.md`
-  - `docs/ai_rewrite_plan.md`
-  - 相关测试文件
-- 生成 dry-run prompt 报告：
-  - `eval_reports/deepseek-rewrite-eval-four-modes-dry-run.md`
-- 重新构建带本机 API 配置的 DMG：
-  - 路径：`dist/NexVoice-20260621-four-modes.dmg`
-  - SHA256：`3181aac5d3c87bd65c9f7d6b56f86f23c8c4a6872cdda6acb7602a3ec637994e`
-  - DMG 已挂载检查，根目录包含 `NexVoice.app` 和 `Applications` 快捷入口。
+  - `Tests/NexVoiceCoreTests/DeepSeekFinalRewriteConfigurationTests.swift`
+- 已重新构建带本机 API 配置的看屏回复版 DMG：
+  - 路径：`dist/NexVoice-20260621-screen-reply.dmg`
+  - SHA256：`b05ad56cc103c92dfd91c94257a1adabdb8bdeb3ca5363ec9c799678b7883cca`
 
 ## 验证情况
 
-- `swift test --disable-sandbox --quiet`：通过 120 个测试。
+- `swift test --disable-sandbox --quiet`：通过 121 个测试。
 - `git diff --check`：通过。
 - `CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceApp`：通过。
-- `CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceRewriteEval`：通过。
-- `.build/debug/NexVoiceRewriteEval --dry-run --include-prompt --output eval_reports/deepseek-rewrite-eval-four-modes-dry-run.md`：通过，确认四个新模式 prompt 和 `有三点` 分点识别生效。
-- `.build/debug/NexVoiceRewriteEval --output eval_reports/deepseek-rewrite-eval-amplified-real.md`：通过，真实请求 DeepSeek，未出现失败检查项。
 - `./scripts/build_app.sh release --embed-local-keys`：通过，确认本机 DeepSeek / 腾讯云 ASR 配置已嵌入 App 资源目录。
 - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app`：通过。
 - `plutil -lint dist/NexVoice.app/Contents/Info.plist`：通过。
-- `hdiutil attach -readonly -nobrowse dist/NexVoice-20260621-amplified.dmg`：通过。
+- `hdiutil attach -readonly -nobrowse dist/NexVoice-20260621-screen-reply.dmg`：通过，根目录包含 `NexVoice.app` 和 `Applications` 快捷入口。
 
 ## 待办与风险
 
-1. 需要继续做真实右 Alt 语音验收，重点记录 ASR 首包、ASR final、DeepSeek 改写和最终写入耗时。
-2. 需要用真实语音样本复测四个输出模式的实际效果，尤其是 `社交达人`、`强化嘴替`、`冷静模式` 的边界。
-3. 当前 DMG 内置本机 API 配置，只适合私用或受控分发；商业化版本应改为用户私有配置或 Keychain，不应长期内置共享 Key。
-4. App 内 `运行 DeepSeek 评测` 属于开发诊断入口，商业化发布前建议移除或隐藏。
-5. 如果未来恢复 Fast 路径，必须先证明输出质量不低于完整 DeepSeek prompt；当前正式路径以完整 prompt 为准。
+1. 看屏回复第一版依赖窗口截图 + OCR，只能读取屏幕可见内容；微信等聊天软件的复杂气泡、头像、时间线和多列布局可能会影响 `我 / 对方 / 未知` 判断，需要真实样本继续优化。
+2. Apple 屏幕录制权限生效后通常需要重启 App；如果长按右 Alt 一直提示权限，需要退出 NexVoice 后重新打开新版 App。
+3. 需要继续做真实右 Alt 语音验收，重点记录 ASR 首包、ASR final、DeepSeek 改写和最终写入耗时。
+4. 当前 DMG 内置本机 API 配置，只适合私用或受控分发；商业化版本应改为用户私有配置或 Keychain，不应长期内置共享 Key。
+5. App 内 `运行 DeepSeek 评测` 属于开发诊断入口，商业化发布前建议移除或隐藏。
+6. 如果未来恢复 Fast 路径，必须先证明输出质量不低于完整 DeepSeek prompt；当前正式路径以完整 prompt 为准。
 
 ## 下一步建议
 
-1. 用新 DMG 做一次真实安装和右 Alt 输入验收。
-2. 连续测试四个输出模式各 5-10 条真实语音样本。
-3. 根据样本结果微调 prompt，而不是继续增加大量反向约束。
+1. 用新 DMG 做一次真实安装和右 Alt 短按 / 长按验收。
+2. 在微信、浏览器、邮件、Codex 四类 App 中测试看屏回复，分别记录 OCR 是否完整、回复是否符合上下文、是否遵循当前输出模式。
+3. 连续测试四个输出模式各 5-10 条真实语音样本。
