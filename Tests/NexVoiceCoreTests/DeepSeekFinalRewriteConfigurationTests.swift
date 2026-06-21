@@ -303,6 +303,7 @@ import Testing
         对方：这个方案今天能定吗？
         我：还需要再确认风险。
         """,
+        voiceInstruction: "用更强硬一点的语气回复第二句",
         outputLanguage: .simplifiedChinese,
         style: .amplifiedSpokesperson,
         context: VoiceRewriteContext(sourceApplicationName: "WeChat")
@@ -310,6 +311,10 @@ import Testing
 
     #expect(prompt.contains("看屏回复模式"))
     #expect(prompt.contains("当前前台应用可见区域"))
+    #expect(prompt.contains("新回复"))
+    #expect(prompt.contains("不是复读、翻译、整理、改写或摘抄屏幕里的聊天记录"))
+    #expect(prompt.contains("不要输出任何一条可见原文的重复或近似复述"))
+    #expect(prompt.contains("用更强硬一点的语气回复第二句"))
     #expect(prompt.contains("不要把所有发言当成同一个人"))
     #expect(prompt.contains("只基于可见内容"))
     #expect(prompt.contains("强化嘴替"))

@@ -11,12 +11,14 @@ import Testing
     #expect(VoiceWaveformDisplayPolicy.panelSize == CGSize(width: 92, height: 44))
     #expect(VoiceWaveformDisplayPolicy.bottomOffset == 8)
     #expect(VoiceWaveformDisplayPolicy.screenEdgeInset == 8)
+    #expect(VoiceWaveformDisplayPolicy.topPadding == VoiceWaveformDisplayPolicy.horizontalPadding)
+    #expect(VoiceWaveformDisplayPolicy.bottomPadding == VoiceWaveformDisplayPolicy.horizontalPadding)
 }
 
 @Test func waveformDisplayPolicyGrowsAndCapsTextAreaHeight() {
     #expect(VoiceWaveformDisplayPolicy.expandedPanelWidth == 420)
-    #expect(VoiceWaveformDisplayPolicy.expandedPanelHeight(for: 12) == 80)
-    #expect(VoiceWaveformDisplayPolicy.expandedPanelHeight(for: 90) == 142)
+    #expect(VoiceWaveformDisplayPolicy.expandedPanelHeight(for: 12) == 92)
+    #expect(VoiceWaveformDisplayPolicy.expandedPanelHeight(for: 90) == 154)
     #expect(VoiceWaveformDisplayPolicy.expandedPanelHeight(for: 400) == VoiceWaveformDisplayPolicy.maximumPanelHeight)
 }
 

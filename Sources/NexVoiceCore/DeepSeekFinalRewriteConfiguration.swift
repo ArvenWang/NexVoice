@@ -170,6 +170,7 @@ public enum VoiceRewritePromptPolicy {
     public static func screenReplyPromptPlan(
         visibleText: String,
         structuredMessages: String,
+        voiceInstruction: String = "",
         outputLanguage: VoiceOutputLanguage,
         style: VoiceRewriteStyle = .default,
         context: VoiceRewriteContext? = nil
@@ -180,6 +181,7 @@ public enum VoiceRewritePromptPolicy {
             userPrompt: screenReplyPrompt(
                 visibleText: visibleText,
                 structuredMessages: structuredMessages,
+                voiceInstruction: voiceInstruction,
                 outputLanguage: outputLanguage,
                 style: style,
                 context: context
@@ -272,6 +274,7 @@ public enum VoiceRewritePromptPolicy {
     public static func screenReplyPrompt(
         visibleText: String,
         structuredMessages: String,
+        voiceInstruction: String = "",
         outputLanguage: VoiceOutputLanguage,
         style: VoiceRewriteStyle = .default,
         context: VoiceRewriteContext? = nil
@@ -284,10 +287,12 @@ public enum VoiceRewritePromptPolicy {
             languageInstruction = "Use natural American English unless the conversation context clearly calls for another language."
         }
         return """
-        看屏回复模式：下面是当前前台应用可见区域 OCR 出来的文字。请根据可见上下文，替用户生成一条可以直接填入当前输入框的回复。
+        看屏回复模式：下面是当前前台应用可见区域 OCR 出来的文字。请根据可见上下文，替用户生成一条可以直接填入当前输入框的新回复。
 
         重要规则：
         - 只输出最终回复，不解释、不总结、不复述规则。
+        - 任务是“替用户回复”，不是复读、翻译、整理、改写或摘抄屏幕里的聊天记录；除非用户语音指令明确要求引用，否则不要输出任何一条可见原文的重复或近似复述。
+        - 回复应针对当前对话里最新、最需要回应的内容；如果用户语音指令指定了某句话、某一段、某种语气或某个回复方向，优先按语音指令执行。
         - 不要把所有发言当成同一个人；如果结构化消息里有“我 / 对方 / 未知”，请据此判断对话关系。
         - 只基于可见内容回复；不要假装看到了屏幕外、滚动上方或历史聊天记录。
         - 如果 OCR 内容不足以判断上下文，输出一条自然的追问或谨慎回复，不要编造事实。
@@ -300,6 +305,9 @@ public enum VoiceRewritePromptPolicy {
         \(style.promptInstruction)
 
         \(context?.promptBlock ?? "当前上下文：未知")
+
+        用户语音指令：
+        \(voiceInstruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "无。请按当前可见上下文生成自然回复。" : voiceInstruction.trimmingCharacters(in: .whitespacesAndNewlines))
 
         结构化可见消息：
         \(structuredMessages.trimmingCharacters(in: .whitespacesAndNewlines))

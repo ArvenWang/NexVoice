@@ -100,6 +100,7 @@ final class DeepSeekFinalRewriteService: Sendable {
     func handleScreenReply(
         visibleText: String,
         structuredMessages: String,
+        voiceInstruction: String = "",
         outputLanguage: VoiceOutputLanguage,
         style: VoiceRewriteStyle = .default,
         context: VoiceRewriteContext = VoiceRewriteContext()
@@ -112,10 +113,15 @@ final class DeepSeekFinalRewriteService: Sendable {
         let promptPlan = VoiceRewritePromptPolicy.screenReplyPromptPlan(
             visibleText: visibleText,
             structuredMessages: structuredMessages,
+            voiceInstruction: voiceInstruction,
             outputLanguage: outputLanguage,
             style: style,
             context: context
         )
+        let instructionCharacters = max(
+            visibleText.count,
+            structuredMessages.count
+        ) + voiceInstruction.trimmingCharacters(in: .whitespacesAndNewlines).count
 
         return try await complete(
             promptPlan: promptPlan,
@@ -123,7 +129,7 @@ final class DeepSeekFinalRewriteService: Sendable {
             outputLanguage: outputLanguage,
             style: style,
             selectedTextCharacters: nil,
-            instructionCharacters: max(visibleText.count, structuredMessages.count),
+            instructionCharacters: instructionCharacters,
             context: context,
             temperature: style.rewriteTemperature,
             sourceText: nil

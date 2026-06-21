@@ -290,10 +290,7 @@ final class VoiceCaptionPanelController {
         transcriptTextView.isEditable = false
         transcriptTextView.isSelectable = false
         transcriptTextView.drawsBackground = false
-        transcriptTextView.textContainerInset = NSSize(
-            width: VoiceWaveformDisplayPolicy.transcriptTextInset,
-            height: 1
-        )
+        applyTranscriptTextInsets(verticalInset: VoiceWaveformDisplayPolicy.transcriptTextInset)
         transcriptTextView.textContainer?.lineFragmentPadding = 0
         transcriptTextView.textContainer?.widthTracksTextView = true
         transcriptTextView.textContainer?.containerSize = NSSize(
@@ -373,6 +370,7 @@ final class VoiceCaptionPanelController {
         guard !trimmed.isEmpty else {
             cancelTranscriptReveal()
             transcriptTextView.string = ""
+            applyTranscriptTextInsets(verticalInset: VoiceWaveformDisplayPolicy.transcriptTextInset)
             transcriptScrollView.hasVerticalScroller = false
             textHeightConstraint?.constant = 0
             transcriptScrollView.alphaValue = 0
@@ -392,12 +390,18 @@ final class VoiceCaptionPanelController {
             renderTranscript(text: trimmed, revealPrefixLength: trimmed.count, progress: 1)
         }
 
-        let measuredHeight = measuredTextHeight(for: trimmed)
+        let rawTextHeight = rawMeasuredTextHeight(for: trimmed)
+        let measuredHeight = rawTextHeight + VoiceWaveformDisplayPolicy.transcriptTextInset * 2
         let maximumTextHeight = showsWaveformInTextPanel
             ? VoiceWaveformDisplayPolicy.maximumTextHeight
             : VoiceWaveformDisplayPolicy.maximumResultTextHeight
         let textHeight = min(measuredHeight, maximumTextHeight)
         transcriptScrollView.hasVerticalScroller = measuredHeight > maximumTextHeight
+        let verticalInset = max(
+            VoiceWaveformDisplayPolicy.transcriptTextInset,
+            floor((textHeight - rawTextHeight) / 2)
+        )
+        applyTranscriptTextInsets(verticalInset: verticalInset)
         textHeightConstraint?.constant = textHeight
         transcriptTextView.frame = NSRect(
             x: 0,
@@ -416,7 +420,7 @@ final class VoiceCaptionPanelController {
         revealTranscriptContainerIfNeeded(wasEmpty: wasEmpty)
     }
 
-    private func measuredTextHeight(for text: String) -> CGFloat {
+    private func rawMeasuredTextHeight(for text: String) -> CGFloat {
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.lineBreakMode = .byWordWrapping
         paragraphStyle.lineSpacing = 2
@@ -434,7 +438,14 @@ final class VoiceCaptionPanelController {
             ),
             options: [.usesLineFragmentOrigin, .usesFontLeading]
         )
-        return ceil(rect.height) + 6
+        return ceil(rect.height)
+    }
+
+    private func applyTranscriptTextInsets(verticalInset: CGFloat) {
+        transcriptTextView.textContainerInset = NSSize(
+            width: VoiceWaveformDisplayPolicy.transcriptTextInset,
+            height: verticalInset
+        )
     }
 
     private func updatePanelSize(to size: CGSize, animated: Bool = false) {

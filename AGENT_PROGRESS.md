@@ -33,13 +33,25 @@
   - 菜单提供 `个人词库...`，可查看、刷新和删除词条。
   - 学习成功使用底部 toast，不再弹阻塞确认框。
 - 看屏自动回复：
-  - 长按默认右 Alt 触发，不进入录音。
+  - 长按默认右 Alt 触发，先抓取当前前台窗口可见文字，再进入语音指令录制。
   - 读取当前前台应用最大可见窗口，使用 Apple Vision 本地 OCR 提取可见文字。
-  - 按文字位置粗略生成 `我 / 对方 / 未知` 结构，交给 DeepSeek 生成一条回复。
+  - 按文字位置粗略生成 `我 / 对方 / 未知` 结构；用户可继续用语音指定语气、回复对象或回复方向。
   - 回复遵循当前输出语言和四个输出模式，最终写入当前输入框，但不自动发送。
+  - DeepSeek prompt 明确要求生成新回复，默认禁止复读、翻译、整理或摘抄屏幕里的原句。
   - 该模式只基于屏幕可见内容，不滚动、不读取屏幕外历史；`screen_reply` 诊断日志不保存 OCR 全文。
 
 ## 本轮完成
+
+- 修复用户截图中的浮层上下间距不一致问题：外层上下 padding 统一为左右 padding 的 `14`。
+- 修复单行翻译/输出结果贴上沿的问题：文本容器会按当前内容高度动态设置上下内边距，单行时在垂直方向居中。
+- 保留上一轮 overlay 滚动条和右侧安全区，避免滚动条占用正文宽度或遮挡文字。
+- 修复看屏回复容易复读上方聊天记录的问题：`screen_reply` prompt 改为“生成一条新回复”，并明确禁止在默认情况下复读、翻译、整理、改写或摘抄屏幕里的原句。
+- 看屏回复新增语音指令：长按右 Alt 后先抓屏，再开启腾讯云 ASR 录制回复指令；再次按右 Alt 结束后，DeepSeek 会结合屏幕上下文和语音指令生成回复。如果没有说指令，会按默认上下文生成自然回复。
+- 本轮待重新构建带本机 API 配置的 DMG：
+  - 路径：`dist/NexVoice-20260621-screen-voice-instruction.dmg`
+  - SHA256：`7de67ec5868cf20abd020f8a89ebb39dace839d21510f9edcf730360026694e8`
+
+## 上轮完成
 
 - 修复用户截图中的严重浮层问题：选中文本后语音指令的翻译结果不再左右裁切，滚动条改为悬浮 overlay，不再挤压正文导致文字消失。
 - 同步修复实时识别文字框：识别草稿和结果框共用同一套文本容器宽度、正文内边距和滚动条安全区。
@@ -51,7 +63,7 @@
   - 路径：`dist/NexVoice-20260621-text-panel-fix.dmg`
   - SHA256：`0d6851c5d339b65230eaa372a8d5ea4be722ec958dc7563b0cb8d4ae30e6f203`
 
-## 上轮完成
+## 更早完成
 
 - 新增看屏自动回复第一版：长按快捷键进入 `看屏中` / `AI 回复中` 状态，当前窗口可见文字经 OCR 后交给 DeepSeek 生成回复，并写入当前聚焦输入框。
 - 新增屏幕录制权限菜单入口；未授权时会引导授权，不会静默失败。
@@ -80,7 +92,7 @@
 - `./scripts/build_app.sh release --embed-local-keys`：通过，确认本机 DeepSeek / 腾讯云 ASR 配置已嵌入 App 资源目录。
 - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app`：通过。
 - `plutil -lint dist/NexVoice.app/Contents/Info.plist`：通过。
-- `hdiutil attach -readonly -nobrowse dist/NexVoice-20260621-text-panel-fix.dmg`：通过，根目录包含 `NexVoice.app` 和 `Applications` 快捷入口。
+- `hdiutil attach -readonly -nobrowse dist/NexVoice-20260621-screen-voice-instruction.dmg`：通过，根目录包含 `NexVoice.app` 和 `Applications` 快捷入口。
 
 ## 待办与风险
 

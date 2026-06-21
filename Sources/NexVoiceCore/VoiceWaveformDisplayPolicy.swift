@@ -14,9 +14,9 @@ public enum VoiceWaveformDisplayPolicy {
     public static let transcriptTextInset: CGFloat = 6
     public static let floatingScrollerGutter: CGFloat = 24
     public static let floatingScrollerRightInset: CGFloat = 8
-    public static let topPadding: CGFloat = 8
+    public static let topPadding: CGFloat = horizontalPadding
     public static let textWaveformSpacing: CGFloat = 8
-    public static let bottomPadding: CGFloat = 8
+    public static let bottomPadding: CGFloat = horizontalPadding
     public static let transcriptFontSize: CGFloat = 13
     public static let panelSize = compactPanelSize
     public static let bottomOffset: CGFloat = 8
