@@ -4,15 +4,21 @@ import Testing
 
 @Test func waveformDisplayPolicyKeepsPanelCompact() {
     #expect(VoiceWaveformDisplayPolicy.waveformSize == CGSize(width: 64, height: 28))
-    #expect(VoiceWaveformDisplayPolicy.compactPanelSize == CGSize(width: 92, height: 44))
+    #expect(VoiceWaveformDisplayPolicy.compactPanelSize == CGSize(width: 92, height: 56))
     #expect(VoiceWaveformDisplayPolicy.loadingPanelSize == CGSize(width: 156, height: 44))
     #expect(VoiceWaveformDisplayPolicy.statusPanelSize == CGSize(width: 188, height: 44))
     #expect(VoiceWaveformDisplayPolicy.stageSize == CGSize(width: 420, height: 300))
-    #expect(VoiceWaveformDisplayPolicy.panelSize == CGSize(width: 92, height: 44))
+    #expect(VoiceWaveformDisplayPolicy.panelSize == CGSize(width: 92, height: 56))
     #expect(VoiceWaveformDisplayPolicy.bottomOffset == 8)
     #expect(VoiceWaveformDisplayPolicy.screenEdgeInset == 8)
     #expect(VoiceWaveformDisplayPolicy.topPadding == VoiceWaveformDisplayPolicy.horizontalPadding)
     #expect(VoiceWaveformDisplayPolicy.bottomPadding == VoiceWaveformDisplayPolicy.horizontalPadding)
+    #expect(
+        VoiceWaveformDisplayPolicy.compactPanelSize.height
+            == VoiceWaveformDisplayPolicy.topPadding
+                + VoiceWaveformDisplayPolicy.waveformSize.height
+                + VoiceWaveformDisplayPolicy.bottomPadding
+    )
 }
 
 @Test func waveformDisplayPolicyGrowsAndCapsTextAreaHeight() {

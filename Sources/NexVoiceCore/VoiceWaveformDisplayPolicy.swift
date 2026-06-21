@@ -3,7 +3,7 @@ import Foundation
 
 public enum VoiceWaveformDisplayPolicy {
     public static let waveformSize = CGSize(width: 64, height: 28)
-    public static let compactPanelSize = CGSize(width: 92, height: 44)
+    public static let compactPanelSize = CGSize(width: 92, height: 56)
     public static let loadingPanelSize = CGSize(width: 156, height: 44)
     public static let statusPanelSize = CGSize(width: 188, height: 44)
     public static let expandedPanelWidth: CGFloat = 420

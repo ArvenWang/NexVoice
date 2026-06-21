@@ -44,6 +44,16 @@
 
 ## 本轮完成
 
+- 修复普通语音输入首次显示时波形浮层“先矮后被拉高”的问题：
+  - 原因是紧凑波形态外框高度为 `44`，但内部需要 `上内边距 14 + 波形高度 28 + 下内边距 14 = 56`。
+  - 将 `compactPanelSize.height` 和默认 `panelSize.height` 调整为 `56`，让面板第一次出现时就满足内部约束。
+  - 保持波形高度为 `28`，上下内边距仍为 `14`，波形内容在外框中垂直居中。
+  - 增加测试约束，防止未来再次把紧凑态高度改到小于内部布局所需高度。
+- 已重新构建带本机 API 配置的 APP / DMG：
+  - 版本：`0.1.2 (3)`
+  - APP 路径：`dist/NexVoice.app`
+  - DMG 路径：`dist/NexVoice-0.1.2-waveform-height-fix.dmg`
+  - SHA256：`7fc6cc812c2619770f00e33dd73e90f06ea2c50f2e09439f5dc4798556885864`
 - 新增仓库内版本递增自动化：
   - `scripts/bump_version.sh`：统一递增 `Resources/NexVoiceHost/Info.plist`、`Resources/NexVoiceRewriteEval/Info.plist`、`Resources/NexVoiceRewriteEvalRunner/Info.plist` 的 `CFBundleShortVersionString` 和 `CFBundleVersion`。
   - `.githooks/pre-commit`：提交前检测 staged 内容，只要包含真实迭代改动，就自动执行版本递增并重新 stage 版本文件。
@@ -109,6 +119,7 @@
 - `./scripts/build_app.sh release --embed-local-keys`：通过，确认本机 DeepSeek / 腾讯云 ASR 配置已嵌入 App 资源目录。
 - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app`：通过。
 - `plutil -lint dist/NexVoice.app/Contents/Info.plist`：通过。
+- `hdiutil attach -readonly -nobrowse dist/NexVoice-0.1.2-waveform-height-fix.dmg`：通过，根目录包含 `NexVoice.app` 和 `Applications` 快捷入口。
 - `hdiutil attach -readonly -nobrowse dist/NexVoice-20260621-screen-status-debounce.dmg`：通过，根目录包含 `NexVoice.app` 和 `Applications` 快捷入口。
 
 ## 待办与风险
