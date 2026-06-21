@@ -87,6 +87,26 @@ final class VoiceCaptionPanelController {
         updatePanelSize(to: VoiceWaveformDisplayPolicy.loadingPanelSize, animated: true)
     }
 
+    func showPassiveMessage(_ message: String, anchorRect: CGRect? = nil) {
+        cancelScheduledHide()
+        configurePassivePanel(anchorRect: anchorRect)
+        loadingIndicator.stopAnimation(nil)
+        loadingIndicator.isHidden = true
+        loadingLabel.stringValue = message
+        loadingLabel.textColor = NSColor.white.withAlphaComponent(0.78)
+        waveformView.setActive(false)
+        waveformView.setAmplitude(0)
+        setTranscriptText("")
+        if !panel.isVisible {
+            positionOverlay()
+            preparePanelEntrance()
+            panel.orderFrontRegardless()
+            animatePanelEntranceIfNeeded()
+        }
+        transition(from: stackView, to: loadingStackView)
+        updatePanelSize(to: statusPanelSize(for: message), animated: true)
+    }
+
     func showStatus(_ message: String, isError: Bool, autoHideDelay: TimeInterval = 1.0) {
         cancelScheduledHide()
         configurePassivePanel()

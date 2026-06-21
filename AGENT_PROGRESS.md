@@ -37,10 +37,20 @@
   - 读取当前前台应用最大可见窗口，使用 Apple Vision 本地 OCR 提取可见文字。
   - 按文字位置粗略生成 `我 / 对方 / 未知` 结构；用户可在按住期间用语音指定语气、回复对象或回复方向。
   - 回复遵循当前输出语言和四个输出模式，最终写入当前输入框，但不自动发送。
+  - 看屏监听阶段只显示极简状态条，不复用普通语音输入的实时转写大框或波形条。
   - DeepSeek prompt 明确要求生成新回复，默认禁止复读、翻译、整理或摘抄屏幕里的原句。
   - 该模式只基于屏幕可见内容，不滚动、不读取屏幕外历史；`screen_reply` 诊断日志不保存 OCR 全文。
 
 ## 本轮完成
+
+- 看屏回复交互极简化：激活看屏和监听语音指令时只显示 `看屏中` / `监听中` / `识别指令中` 这类状态条。
+- 看屏回复分支不再调用普通语音输入的 `captionPanel.apply(event)`，因此不会展示实时识别文字、波形条或普通语音输入大框。
+- 新增 `VoiceCaptionPanelController.showPassiveMessage`，用于无 spinner、无波形、无实时文本的持久状态提示。
+- 本轮待重新构建带本机 API 配置的 DMG：
+  - 路径：`dist/NexVoice-20260621-screen-minimal-listening.dmg`
+  - SHA256：`583297124928f05c7c78db256759c11fe013afeab051f5ae54844fc59f6f8698`
+
+## 上轮完成
 
 - 修复用户截图中的浮层上下间距不一致问题：外层上下 padding 统一为左右 padding 的 `14`。
 - 修复单行翻译/输出结果贴上沿的问题：文本容器会按当前内容高度动态设置上下内边距，单行时在垂直方向居中。
@@ -51,7 +61,7 @@
   - 路径：`dist/NexVoice-20260621-hold-screen-instruction.dmg`
   - SHA256：`d748a6604eb1cbb5cde58e4c2e9d395cf2d8ad7f74d824465f592e8fedaaaaee`
 
-## 上轮完成
+## 更早完成
 
 - 修复用户截图中的严重浮层问题：选中文本后语音指令的翻译结果不再左右裁切，滚动条改为悬浮 overlay，不再挤压正文导致文字消失。
 - 同步修复实时识别文字框：识别草稿和结果框共用同一套文本容器宽度、正文内边距和滚动条安全区。
@@ -92,7 +102,7 @@
 - `./scripts/build_app.sh release --embed-local-keys`：通过，确认本机 DeepSeek / 腾讯云 ASR 配置已嵌入 App 资源目录。
 - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app`：通过。
 - `plutil -lint dist/NexVoice.app/Contents/Info.plist`：通过。
-- `hdiutil attach -readonly -nobrowse dist/NexVoice-20260621-hold-screen-instruction.dmg`：通过，根目录包含 `NexVoice.app` 和 `Applications` 快捷入口。
+- `hdiutil attach -readonly -nobrowse dist/NexVoice-20260621-screen-minimal-listening.dmg`：通过，根目录包含 `NexVoice.app` 和 `Applications` 快捷入口。
 
 ## 待办与风险
 
