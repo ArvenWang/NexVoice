@@ -315,8 +315,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         isScreenReplyInstructionSession = true
         dictionaryLearningMonitor.cancel()
         rewriteTask?.cancel()
-        captionPanel.showPassiveMessage("看屏中")
-        statusItem?.button?.title = "NexVoice 看屏中"
+        captionPanel.showPassiveMessage("识别中")
+        statusItem?.button?.title = "NexVoice 识别中"
         refreshMenuState()
 
         let targetApplication = targetApplicationForCurrentSession
@@ -359,7 +359,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.generateScreenReply(voiceInstruction: instruction)
                 } else {
                     self.isRewritingCurrentSession = false
-                    self.statusItem?.button?.title = "NexVoice 看屏指令中"
+                    self.statusItem?.button?.title = "NexVoice 识别中"
                     self.refreshMenuState()
                 }
             }
@@ -376,7 +376,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             finishScreenReplyInstructionSession()
             return
         }
-        captionPanel.showPassiveMessage("监听中")
+        captionPanel.showPassiveMessage("识别中")
         do {
             try transcriptionService.start(
                 personalDictionary: personalDictionary,
@@ -386,7 +386,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.handleTranscriptionEvent(event)
                 }
             }
-            statusItem?.button?.title = "NexVoice 看屏指令中"
+            statusItem?.button?.title = "NexVoice 识别中"
             refreshMenuState()
         } catch {
             generateScreenReply(voiceInstruction: "")
@@ -493,13 +493,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         insertFinalTextIfNeeded(from: event)
         switch event {
         case .sessionStarted:
-            statusItem?.button?.title = isScreenReplyInstructionSession
-                ? "NexVoice 看屏指令中"
-                : "NexVoice 听写中"
+            statusItem?.button?.title = "NexVoice 听写中"
         case .partialTranscript:
-            statusItem?.button?.title = isScreenReplyInstructionSession
-                ? "NexVoice 看屏指令中"
-                : "NexVoice 转写中"
+            statusItem?.button?.title = "NexVoice 转写中"
         case .finalTranscript, .sessionEnded:
             statusItem?.button?.title = "NexVoice"
             refreshMenuState()
@@ -512,11 +508,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleScreenReplyInstructionEvent(_ event: VoiceRealtimeEvent) {
         switch event {
-        case .sessionStarted, .partialTranscript, .audioLevelUpdated, .latencyUpdated:
-            statusItem?.button?.title = "NexVoice 看屏指令中"
+        case .partialTranscript:
+            captionPanel.showPassiveMessage("识别到指令")
+            statusItem?.button?.title = "NexVoice 识别到指令"
+        case .sessionStarted, .audioLevelUpdated, .latencyUpdated:
+            statusItem?.button?.title = "NexVoice 识别中"
         case .sessionEnded:
             if isRewritingCurrentSession {
-                statusItem?.button?.title = "NexVoice 回复中"
+                statusItem?.button?.title = "NexVoice AI 输入中"
             }
         case .finalTranscript, .failed, .partialTranslation, .finalTranslation:
             break
@@ -665,16 +664,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let capturedContext = screenReplyCapturedContextForCurrentSession else {
             pendingScreenReplyVoiceInstruction = trimmedInstruction
             isRewritingCurrentSession = true
-            captionPanel.showPassiveMessage("看屏中")
-            statusItem?.button?.title = "NexVoice 看屏中"
+            captionPanel.showLoading("AI 输入中")
+            statusItem?.button?.title = "NexVoice AI 输入中"
             refreshMenuState()
             return
         }
         guard !didInsertCurrentSession else { return }
         didInsertCurrentSession = true
         isRewritingCurrentSession = true
-        captionPanel.showLoading("AI 回复中")
-        statusItem?.button?.title = "NexVoice 回复中"
+        captionPanel.showLoading("AI 输入中")
+        statusItem?.button?.title = "NexVoice AI 输入中"
         refreshMenuState()
 
         let outputLanguage = selectedOutputLanguage
@@ -760,13 +759,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func stopTranscription() {
         if isScreenReplyInstructionSession {
-            captionPanel.showPassiveMessage("识别指令中")
+            captionPanel.showLoading("AI 输入中")
         } else {
             captionPanel.showLoading("正在处理")
         }
         transcriptionService.finish()
         statusItem?.button?.title = isScreenReplyInstructionSession
-            ? "NexVoice 识别指令中"
+            ? "NexVoice AI 输入中"
             : "NexVoice 等待腾讯云结果"
         refreshMenuState()
     }

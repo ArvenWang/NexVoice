@@ -43,12 +43,12 @@
 
 ## 本轮完成
 
-- 看屏回复交互极简化：激活看屏和监听语音指令时只显示 `看屏中` / `监听中` / `识别指令中` 这类状态条。
+- 看屏回复交互进一步简化：按住时只显示 `识别中`；如果检测到语音指令，显示 `识别到指令`；松开后直接进入 `AI 输入中`。
 - 看屏回复分支不再调用普通语音输入的 `captionPanel.apply(event)`，因此不会展示实时识别文字、波形条或普通语音输入大框。
 - 新增 `VoiceCaptionPanelController.showPassiveMessage`，用于无 spinner、无波形、无实时文本的持久状态提示。
 - 本轮待重新构建带本机 API 配置的 DMG：
-  - 路径：`dist/NexVoice-20260621-screen-minimal-listening.dmg`
-  - SHA256：`583297124928f05c7c78db256759c11fe013afeab051f5ae54844fc59f6f8698`
+  - 路径：`dist/NexVoice-20260621-screen-simple-states.dmg`
+  - SHA256：`a30aad987a8f6068989be54da503cb19b3ba32731217df154fa6007291c18bb2`
 
 ## 上轮完成
 
@@ -102,7 +102,7 @@
 - `./scripts/build_app.sh release --embed-local-keys`：通过，确认本机 DeepSeek / 腾讯云 ASR 配置已嵌入 App 资源目录。
 - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app`：通过。
 - `plutil -lint dist/NexVoice.app/Contents/Info.plist`：通过。
-- `hdiutil attach -readonly -nobrowse dist/NexVoice-20260621-screen-minimal-listening.dmg`：通过，根目录包含 `NexVoice.app` 和 `Applications` 快捷入口。
+- `hdiutil attach -readonly -nobrowse dist/NexVoice-20260621-screen-simple-states.dmg`：通过，根目录包含 `NexVoice.app` 和 `Applications` 快捷入口。
 
 ## 待办与风险
 
