@@ -48,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var insertedTextPreview: String?
     private var isRewritingCurrentSession = false
     private var isScreenReplyInstructionSession = false
+    private var didDetectScreenReplyVoiceInstruction = false
     private var beginSessionTask: Task<Void, Never>?
     private var rewriteTask: Task<Void, Never>?
     private var permissionRefreshWorkItem: DispatchWorkItem?
@@ -313,6 +314,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         insertedTextPreview = nil
         isRewritingCurrentSession = true
         isScreenReplyInstructionSession = true
+        didDetectScreenReplyVoiceInstruction = false
         dictionaryLearningMonitor.cancel()
         rewriteTask?.cancel()
         captionPanel.showPassiveMessage("识别中")
@@ -404,6 +406,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         insertedTextPreview = nil
         isRewritingCurrentSession = false
         isScreenReplyInstructionSession = false
+        didDetectScreenReplyVoiceInstruction = false
         dictionaryLearningMonitor.cancel()
         activeDictionaryLearningTasks = 0
         dictionaryLearningResetWorkItem?.cancel()
@@ -509,10 +512,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleScreenReplyInstructionEvent(_ event: VoiceRealtimeEvent) {
         switch event {
         case .partialTranscript:
+            guard !didDetectScreenReplyVoiceInstruction else { return }
+            didDetectScreenReplyVoiceInstruction = true
             captionPanel.showPassiveMessage("识别到指令")
             statusItem?.button?.title = "NexVoice 识别到指令"
         case .sessionStarted, .audioLevelUpdated, .latencyUpdated:
-            statusItem?.button?.title = "NexVoice 识别中"
+            statusItem?.button?.title = didDetectScreenReplyVoiceInstruction
+                ? "NexVoice 识别到指令"
+                : "NexVoice 识别中"
         case .sessionEnded:
             if isRewritingCurrentSession {
                 statusItem?.button?.title = "NexVoice AI 输入中"
@@ -753,6 +760,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func finishScreenReplyInstructionSession() {
         isScreenReplyInstructionSession = false
+        didDetectScreenReplyVoiceInstruction = false
         screenReplyCapturedContextForCurrentSession = nil
         pendingScreenReplyVoiceInstruction = nil
     }
@@ -788,6 +796,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         targetApplicationForCurrentSession = nil
         isRewritingCurrentSession = false
         isScreenReplyInstructionSession = false
+        didDetectScreenReplyVoiceInstruction = false
         dictionaryLearningMonitor.cancel()
         activeDictionaryLearningTasks = 0
         dictionaryLearningResetWorkItem?.cancel()

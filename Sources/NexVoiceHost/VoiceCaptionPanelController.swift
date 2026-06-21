@@ -90,6 +90,13 @@ final class VoiceCaptionPanelController {
     func showPassiveMessage(_ message: String, anchorRect: CGRect? = nil) {
         cancelScheduledHide()
         configurePassivePanel(anchorRect: anchorRect)
+        if panel.isVisible,
+           loadingStackView.isHidden == false,
+           stackView.isHidden,
+           loadingIndicator.isHidden,
+           loadingLabel.stringValue == message {
+            return
+        }
         loadingIndicator.stopAnimation(nil)
         loadingIndicator.isHidden = true
         loadingLabel.stringValue = message
