@@ -1,10 +1,18 @@
 import AppKit
 @preconcurrency import ApplicationServices
+import CoreGraphics
 
 @MainActor
 enum SystemPermissionRequester {
     static var hasAccessibilityPermission: Bool {
         AXIsProcessTrusted()
+    }
+
+    static var hasInputMonitoringPermission: Bool {
+        if #available(macOS 10.15, *) {
+            return CGPreflightListenEventAccess()
+        }
+        return true
     }
 
     static var hasScreenRecordingPermission: Bool {
@@ -23,6 +31,21 @@ enum SystemPermissionRequester {
             "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
             "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility"
         ])
+    }
+
+    static func openInputMonitoringSettings() {
+        openFirstAvailableURL([
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent",
+            "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ListenEvent"
+        ])
+    }
+
+    @discardableResult
+    static func requestInputMonitoringPermission() -> Bool {
+        if #available(macOS 10.15, *) {
+            return CGRequestListenEventAccess()
+        }
+        return true
     }
 
     @discardableResult

@@ -195,6 +195,15 @@ public enum VoiceShortcutGlobalCapturePolicy {
             return true
         }
     }
+
+    public static func usesLowLevelKeyboardTapFallback(for shortcut: VoiceShortcut) -> Bool {
+        switch shortcut {
+        case .keyCombo:
+            return true
+        case .functionKey, .rightOptionKey:
+            return false
+        }
+    }
 }
 
 public final class VoiceShortcutStore {

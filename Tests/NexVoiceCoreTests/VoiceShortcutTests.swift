@@ -146,6 +146,15 @@ import Testing
     )
 }
 
+@Test func keyCombosUseLowLevelKeyboardTapFallback() {
+    #expect(!VoiceShortcutGlobalCapturePolicy.usesLowLevelKeyboardTapFallback(for: .rightOptionKey))
+    #expect(
+        VoiceShortcutGlobalCapturePolicy.usesLowLevelKeyboardTapFallback(
+            for: .keyCombo(keyCode: 64, modifiers: [])
+        )
+    )
+}
+
 @Test func toggleShortcutStartsWhenIdleAndFinishesWhenRunning() {
     #expect(VoiceShortcutTriggerPolicy.action(for: .idle) == .begin)
     #expect(VoiceShortcutTriggerPolicy.action(for: .running) == .finish)

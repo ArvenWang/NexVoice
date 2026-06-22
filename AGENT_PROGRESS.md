@@ -44,6 +44,27 @@
 
 ## 本轮完成
 
+- 2026-06-22 继续修复外设裸按键“录制窗口内可触发，关闭窗口后桌面失效”的问题：
+  - 新症状：用户确认外设键可以录制，录制窗口还开着时也能触发；但关闭录制窗口、回到桌面或其他 App 后再次按键失效。
+  - 进一步根因：录制窗口前台时主要依赖 App 内的 local monitor；窗口关闭后必须依赖真正的全局键盘通道。上一版只保留 Carbon + `NSEvent.addGlobalMonitorForEvents`，仍不能覆盖该外设键的桌面全局触发。
+  - 修复：新增 `GlobalKeyboardEventTap`，使用 CoreGraphics `CGEvent.tapCreate(..., options: .listenOnly)` 监听全局 keyDown / keyUp / flagsChanged，作为 `.keyCombo` 的低层键盘回退。
+  - event tap 只监听，不吞键、不改键盘输入；按下/松开仍复用 `GlobalVoiceShortcutMonitor` 原有短按/长按状态机，避免另建一套触发逻辑。
+  - `VoiceShortcutGlobalCapturePolicy` 新增 `usesLowLevelKeyboardTapFallback(for:)`：仅 `.keyCombo` 启用低层 keyboard tap；右 Alt 仍走原 flagsChanged 路径。
+  - 启动 `.keyCombo` 快捷键时，现在要求 Carbon 注册和低层 keyboard tap 都可用；如果失败，会提示 `需要输入监控权限` 或 `快捷键被占用`，不再静默失效。
+  - 新增菜单项 `申请输入监控权限`，使用 CoreGraphics `CGRequestListenEventAccess()` 触发系统授权，并可跳转到系统“输入监控”设置页。
+  - 新增测试：`.keyCombo` 必须启用低层 keyboard tap fallback。
+  - `swift test --quiet` 通过 132 个测试。
+  - `swift build --product NexVoiceApp` 通过。
+  - `git diff --check` 通过；仓库精确密钥扫描通过，未发现本机 AppID / SecretId / SecretKey 精确值写入仓库。
+  - 已 bump 版本：`0.1.6 (7)` -> `0.1.7 (8)`。
+  - 已重新构建并安装带本机配置的 `/Applications/NexVoice.app`，当前运行 PID 为 `76053`。
+  - 安装版 `codesign --verify --deep --strict /Applications/NexVoice.app` 通过。
+  - 安装版 `plutil -lint /Applications/NexVoice.app/Contents/Info.plist` 通过。
+  - 新 DMG：`dist/NexVoice-0.1.7-build8-keyboard-event-tap-embedded-keys-20260622.dmg`。
+  - 新 DMG SHA256：`b3ec2f7a1ebaf26287478b4ab54832f4d340e961b3ff281dbb288af63d41445e`。
+  - 已挂载新 DMG 验证根目录包含 `NexVoice.app` 和 `Applications` 快捷入口，App 内含 DeepSeek / TencentCloudASR 嵌入配置且字段完整。
+  - `hdiutil verify dist/NexVoice-0.1.7-build8-keyboard-event-tap-embedded-keys-20260622.dmg` 通过。
+  - 仍需用户真实验收：如果首次使用时提示 `需要输入监控权限`，从菜单点击 `申请输入监控权限` 并允许 NexVoice；授权后重新打开 App，再测试 F17/外设裸键在桌面和其他 App 中触发。
 - 2026-06-22 继续修复外设裸按键“能录制但不能激活”的问题：
   - 用户实测截图显示快捷键可录制为 `Key 64`，说明设置窗口录制和 `UserDefaults` 写入已成功；本机偏好里也确认保存为 `{"keyCombo":{"modifiers":[],"keyCode":64}}`。
   - 根因：上一版让裸按键走 Carbon `RegisterEventHotKey`，但 `GlobalVoiceShortcutMonitor` 在 `usesRegisteredHotKey == true` 时直接忽略普通 `NSEvent` 全局 keyDown/keyUp；对这类外设/扩展功能键，Carbon 可能注册成功但实际不回调，导致“能录上但触发不了”。

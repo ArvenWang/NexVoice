@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var personalDictionaryMenuItem: NSMenuItem?
     private var rewriteEvaluationMenuItem: NSMenuItem?
     private var accessibilityMenuItem: NSMenuItem?
+    private var inputMonitoringMenuItem: NSMenuItem?
     private var screenRecordingMenuItem: NSMenuItem?
     private let permissionService = MicrophonePermissionService()
     private let transcriptionService = TencentCloudRealtimeTranscriptionService()
@@ -91,6 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let personalDictionaryItem = NSMenuItem(title: "个人词库...", action: #selector(openPersonalDictionary), keyEquivalent: "")
         let rewriteEvaluationItem = NSMenuItem(title: "运行 DeepSeek 评测", action: #selector(runRewriteEvaluation), keyEquivalent: "")
         let accessibilityItem = NSMenuItem(title: VoicePermissionGuidance.accessibility.actionTitle, action: #selector(openAccessibilitySettings), keyEquivalent: "")
+        let inputMonitoringItem = NSMenuItem(title: "申请输入监控权限", action: #selector(openInputMonitoringSettings), keyEquivalent: "")
         let screenRecordingItem = NSMenuItem(title: "申请屏幕录制权限", action: #selector(openScreenRecordingSettings), keyEquivalent: "")
         let localASRItem = NSMenuItem(title: "ASR：腾讯云实时 ASR（中英自动）", action: nil, keyEquivalent: "")
         let outputStyleMenu = NSMenu()
@@ -113,6 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "申请麦克风权限", action: #selector(requestMicrophonePermission), keyEquivalent: ""))
         menu.addItem(accessibilityItem)
+        menu.addItem(inputMonitoringItem)
         menu.addItem(screenRecordingItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "退出 NexVoice", action: #selector(quit), keyEquivalent: "q"))
@@ -127,6 +130,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         personalDictionaryMenuItem = personalDictionaryItem
         rewriteEvaluationMenuItem = rewriteEvaluationItem
         accessibilityMenuItem = accessibilityItem
+        inputMonitoringMenuItem = inputMonitoringItem
         screenRecordingMenuItem = screenRecordingItem
 
         item.menu = menu
@@ -178,7 +182,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         )
         if !didStart {
-            captionPanel.showStatus("快捷键被占用", isError: true, autoHideDelay: 1.8)
+            let message = SystemPermissionRequester.hasInputMonitoringPermission
+                ? "快捷键被占用"
+                : "需要输入监控权限"
+            captionPanel.showStatus(message, isError: true, autoHideDelay: 1.8)
         }
         refreshMenuState()
     }
@@ -261,6 +268,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openAccessibilitySettings() {
         _ = FocusedTextInserter.requestAccessibilityPermission()
         captionPanel.showPermissionNotice(.accessibility)
+        schedulePermissionRefresh()
+    }
+
+    @objc private func openInputMonitoringSettings() {
+        if !SystemPermissionRequester.requestInputMonitoringPermission() {
+            SystemPermissionRequester.openInputMonitoringSettings()
+        }
+        captionPanel.showStatus("请允许输入监控", isError: false, autoHideDelay: 1.8)
         schedulePermissionRefresh()
     }
 
@@ -916,6 +931,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         accessibilityMenuItem?.title = textInserter.canPostKeyboardEvents
             ? "辅助功能权限已允许"
             : VoicePermissionGuidance.accessibility.actionTitle
+        inputMonitoringMenuItem?.title = SystemPermissionRequester.hasInputMonitoringPermission
+            ? "输入监控权限已允许"
+            : "申请输入监控权限"
         screenRecordingMenuItem?.title = SystemPermissionRequester.hasScreenRecordingPermission
             ? "屏幕录制权限已允许"
             : "申请屏幕录制权限"

@@ -10,9 +10,11 @@ final class GlobalVoiceShortcutMonitor {
     private var localEventMonitor: Any?
     private var carbonHotKeyRef: EventHotKeyRef?
     private var carbonEventHandlerRef: EventHandlerRef?
+    private let keyboardEventTap = GlobalKeyboardEventTap()
     private var shortcut: VoiceShortcut = .default
     private var usesRegisteredHotKey = false
     private var allowsEventMonitorFallback = false
+    private var usesLowLevelKeyboardTapFallback = false
     private var isPressed = false
     private var isCancelPressed = false
     private var didTriggerLongPress = false
@@ -39,8 +41,13 @@ final class GlobalVoiceShortcutMonitor {
 
         usesRegisteredHotKey = VoiceShortcutGlobalCapturePolicy.strategy(for: shortcut) == .registeredHotKey
         allowsEventMonitorFallback = VoiceShortcutGlobalCapturePolicy.allowsEventMonitorFallback(for: shortcut)
+        usesLowLevelKeyboardTapFallback = VoiceShortcutGlobalCapturePolicy
+            .usesLowLevelKeyboardTapFallback(for: shortcut)
         let didRegisterHotKey = usesRegisteredHotKey
             ? registerCarbonHotKey(for: shortcut)
+            : true
+        let didStartKeyboardEventTap = usesLowLevelKeyboardTapFallback
+            ? startKeyboardEventTap()
             : true
 
         globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
@@ -60,7 +67,7 @@ final class GlobalVoiceShortcutMonitor {
             return event
         }
 
-        return didRegisterHotKey
+        return didRegisterHotKey && didStartKeyboardEventTap
     }
 
     func updateShortcut(_ shortcut: VoiceShortcut) {
@@ -70,6 +77,7 @@ final class GlobalVoiceShortcutMonitor {
 
     func stop() {
         unregisterCarbonHotKey()
+        keyboardEventTap.stop()
         removeMonitor(&globalKeyMonitor)
         removeMonitor(&globalFlagsMonitor)
         removeMonitor(&localEventMonitor)
@@ -84,6 +92,7 @@ final class GlobalVoiceShortcutMonitor {
         isCancelPressed = false
         usesRegisteredHotKey = false
         allowsEventMonitorFallback = false
+        usesLowLevelKeyboardTapFallback = false
     }
 
     private func removeMonitor(_ monitor: inout Any?) {
@@ -105,6 +114,19 @@ final class GlobalVoiceShortcutMonitor {
         }
     }
 
+    private func handleKeyboardTap(type: CGEventType, keyCode: UInt16, flags: CGEventFlags) {
+        switch type {
+        case .keyDown:
+            handleKeyDown(keyCode: keyCode, flags: flags)
+        case .keyUp:
+            handleKeyUp(keyCode: keyCode)
+        case .flagsChanged:
+            handleFlagsChanged(keyCode: keyCode, flags: flags)
+        default:
+            break
+        }
+    }
+
     private func handleKeyDown(_ event: NSEvent) {
         if Self.isEscapeCancel(event), !isCancelPressed {
             isCancelPressed = true
@@ -113,13 +135,10 @@ final class GlobalVoiceShortcutMonitor {
         }
         guard allowsEventMonitorFallback else { return }
 
-        guard shortcut.matchesKeyEvent(
+        handleKeyDown(
             keyCode: event.keyCode,
             flags: Self.cgFlags(from: event.modifierFlags)
-        ), !isPressed else {
-            return
-        }
-        beginShortcutPress()
+        )
     }
 
     private func handleKeyUp(_ event: NSEvent) {
@@ -129,18 +148,35 @@ final class GlobalVoiceShortcutMonitor {
         }
         guard allowsEventMonitorFallback else { return }
 
-        guard isPressed, shortcut.matchesKeyReleaseEvent(keyCode: event.keyCode) else {
+        handleKeyUp(keyCode: event.keyCode)
+    }
+
+    private func handleFlagsChanged(_ event: NSEvent) {
+        guard allowsEventMonitorFallback else { return }
+        handleFlagsChanged(
+            keyCode: event.keyCode,
+            flags: Self.cgFlags(from: event.modifierFlags)
+        )
+    }
+
+    private func handleKeyDown(keyCode: UInt16, flags: CGEventFlags) {
+        guard shortcut.matchesKeyEvent(keyCode: keyCode, flags: flags), !isPressed else {
+            return
+        }
+        beginShortcutPress()
+    }
+
+    private func handleKeyUp(keyCode: UInt16) {
+        guard isPressed, shortcut.matchesKeyReleaseEvent(keyCode: keyCode) else {
             return
         }
         endShortcutPress()
     }
 
-    private func handleFlagsChanged(_ event: NSEvent) {
-        guard allowsEventMonitorFallback else { return }
-        let flags = Self.cgFlags(from: event.modifierFlags)
-        if shortcut.matchesModifierKeyPress(keyCode: event.keyCode, flags: flags), !isPressed {
+    private func handleFlagsChanged(keyCode: UInt16, flags: CGEventFlags) {
+        if shortcut.matchesModifierKeyPress(keyCode: keyCode, flags: flags), !isPressed {
             beginShortcutPress()
-        } else if shortcut.matchesModifierKeyRelease(keyCode: event.keyCode, flags: flags) {
+        } else if shortcut.matchesModifierKeyRelease(keyCode: keyCode, flags: flags) {
             endShortcutPress()
         }
     }
@@ -193,6 +229,12 @@ final class GlobalVoiceShortcutMonitor {
             return false
         }
         return true
+    }
+
+    private func startKeyboardEventTap() -> Bool {
+        keyboardEventTap.start { [weak self] type, keyCode, flags in
+            self?.handleKeyboardTap(type: type, keyCode: keyCode, flags: flags)
+        }
     }
 
     private func unregisterCarbonHotKey() {
