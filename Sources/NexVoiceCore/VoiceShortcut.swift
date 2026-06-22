@@ -94,6 +94,13 @@ public enum VoiceShortcut: Codable, Equatable, Sendable {
         return Self.modifiers(from: flags) == modifiers
     }
 
+    public func matchesKeyReleaseEvent(keyCode: UInt16) -> Bool {
+        guard case .keyCombo(let expectedKeyCode, _) = self else {
+            return false
+        }
+        return expectedKeyCode == keyCode
+    }
+
     public static func modifiers(from flags: CGEventFlags) -> Set<VoiceShortcutModifier> {
         Set(VoiceShortcutModifier.allCases.filter { flags.contains($0.cgFlag) })
     }
@@ -129,6 +136,33 @@ public enum VoiceShortcut: Codable, Equatable, Sendable {
         case 49: return "Space"
         case 53: return "Esc"
         default: return "Key \(keyCode)"
+        }
+    }
+}
+
+public enum VoiceShortcutRecordingEventType: Sendable {
+    case keyDown
+    case flagsChanged
+}
+
+public enum VoiceShortcutRecordingPolicy {
+    public static func shortcut(
+        for eventType: VoiceShortcutRecordingEventType,
+        keyCode: UInt16,
+        flags: CGEventFlags
+    ) -> VoiceShortcut? {
+        switch eventType {
+        case .flagsChanged:
+            guard keyCode == VoiceShortcut.rightOptionKeyCode,
+                  flags.contains(.maskAlternate) else {
+                return nil
+            }
+            return .rightOptionKey
+        case .keyDown:
+            return .keyCombo(
+                keyCode: keyCode,
+                modifiers: VoiceShortcut.modifiers(from: flags)
+            )
         }
     }
 }

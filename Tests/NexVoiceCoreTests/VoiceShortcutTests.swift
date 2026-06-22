@@ -64,6 +64,43 @@ import Testing
     #expect(!shortcut.matchesKeyEvent(keyCode: 49, flags: []))
 }
 
+@Test func keyComboReleaseMatchesKeyCodeWithoutRequiringModifierFlags() {
+    let shortcut = VoiceShortcut.keyCombo(keyCode: 49, modifiers: [.control])
+
+    #expect(shortcut.matchesKeyReleaseEvent(keyCode: 49))
+    #expect(!shortcut.matchesKeyReleaseEvent(keyCode: 36))
+}
+
+@Test func recordingPolicyCapturesRightOptionOnModifierPress() {
+    let shortcut = VoiceShortcutRecordingPolicy.shortcut(
+        for: .flagsChanged,
+        keyCode: VoiceShortcut.rightOptionKeyCode,
+        flags: [.maskAlternate]
+    )
+
+    #expect(shortcut == .rightOptionKey)
+}
+
+@Test func recordingPolicyIgnoresRightOptionRelease() {
+    let shortcut = VoiceShortcutRecordingPolicy.shortcut(
+        for: .flagsChanged,
+        keyCode: VoiceShortcut.rightOptionKeyCode,
+        flags: []
+    )
+
+    #expect(shortcut == nil)
+}
+
+@Test func recordingPolicyCapturesKeyComboFromKeyDown() {
+    let shortcut = VoiceShortcutRecordingPolicy.shortcut(
+        for: .keyDown,
+        keyCode: 49,
+        flags: [.maskControl, .maskShift]
+    )
+
+    #expect(shortcut == .keyCombo(keyCode: 49, modifiers: [.control, .shift]))
+}
+
 @Test func toggleShortcutStartsWhenIdleAndFinishesWhenRunning() {
     #expect(VoiceShortcutTriggerPolicy.action(for: .idle) == .begin)
     #expect(VoiceShortcutTriggerPolicy.action(for: .running) == .finish)

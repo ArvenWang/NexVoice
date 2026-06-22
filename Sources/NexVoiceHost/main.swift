@@ -206,14 +206,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openShortcutSettings() {
-        let controller = VoiceShortcutSettingsWindowController(shortcut: voiceShortcut) { [weak self] shortcut in
-            guard let self else { return }
-            self.voiceShortcut = shortcut
-            self.shortcutStore.save(shortcut)
-            self.shortcutMonitor.updateShortcut(shortcut)
-            self.captionPanel.reset()
-            self.refreshMenuState()
-        }
+        let controller = VoiceShortcutSettingsWindowController(
+            shortcut: voiceShortcut,
+            onShortcutChanged: { [weak self] shortcut in
+                guard let self else { return }
+                self.voiceShortcut = shortcut
+                self.shortcutStore.save(shortcut)
+                self.shortcutMonitor.updateShortcut(shortcut)
+                self.captionPanel.reset()
+                self.refreshMenuState()
+            },
+            onRecordingStateChanged: { [weak self] isRecording in
+                guard let self else { return }
+                if isRecording {
+                    self.shortcutMonitor.stop()
+                } else {
+                    self.startShortcutMonitor()
+                }
+                self.refreshMenuState()
+            }
+        )
         shortcutSettingsWindowController = controller
         controller.showWindow(nil)
     }

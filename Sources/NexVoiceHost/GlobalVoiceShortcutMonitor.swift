@@ -113,10 +113,7 @@ final class GlobalVoiceShortcutMonitor {
             return
         }
 
-        guard shortcut.matchesKeyEvent(
-            keyCode: event.keyCode,
-            flags: Self.cgFlags(from: event.modifierFlags)
-        ) else {
+        guard isPressed, shortcut.matchesKeyReleaseEvent(keyCode: event.keyCode) else {
             return
         }
         endShortcutPress()

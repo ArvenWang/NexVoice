@@ -44,6 +44,25 @@
 
 ## 本轮完成
 
+- 2026-06-22 修复快捷键设置录制不稳定问题：
+  - 根因 1：自定义组合键在 keyUp 阶段仍用 modifierFlags 做精确匹配；macOS 的 keyUp 事件经常已经不带修饰键，导致“录上了但松开后不能触发”。
+  - 根因 2：快捷键设置窗口只用 local event monitor；窗口失焦或事件未派发给 NexVoice 时，录制状态下按键会没有反应。
+  - 修复 `VoiceShortcut.matchesKeyReleaseEvent(keyCode:)`：组合键释放阶段只按 keyCode 结束，按下阶段仍严格校验 modifier 集合。
+  - 新增 `VoiceShortcutRecordingPolicy`：统一右 Alt flagsChanged 录制和 keyDown 组合键录制逻辑。
+  - `VoiceShortcutSettingsWindowController` 录制时同时监听 local/global event，并在窗口关闭时清理 monitor。
+  - 录制期间临时停止主 `GlobalVoiceShortcutMonitor`，录制完成或窗口关闭后恢复，避免旧快捷键抢事件。
+  - 新增快捷键录制/释放测试；`swift test --filter VoiceShortcut --quiet` 通过 13 个快捷键测试。
+  - `swift test --quiet` 通过 126 个测试。
+  - `swift build --product NexVoiceApp` 通过。
+  - 已 bump 版本：`0.1.2 (3)` -> `0.1.3 (4)`。
+  - 已重新构建并安装带本机配置的 `/Applications/NexVoice.app`，当前运行 PID 为 `26124`。
+  - 安装版 `codesign --verify --deep --strict /Applications/NexVoice.app` 通过。
+  - 安装版 `plutil -lint /Applications/NexVoice.app/Contents/Info.plist` 通过。
+  - 新 DMG：`dist/NexVoice-0.1.3-build4-shortcut-recording-fix-embedded-keys-20260622.dmg`。
+  - 新 DMG SHA256：`2f6b44dc9c17dd360362779b5d5e37d9eb5cc026c967f6921349cc854e772ab3`。
+  - 已挂载新 DMG 验证根目录包含 `NexVoice.app` 和 `Applications` 快捷入口，App 内含 DeepSeek / TencentCloudASR 嵌入配置且字段完整。
+  - `hdiutil verify dist/NexVoice-0.1.3-build4-shortcut-recording-fix-embedded-keys-20260622.dmg` 通过。
+  - 仍需用户真实验收：打开“设置快捷键...”，多次录制右 Alt、`Control + Space`、`Option + Space` 等组合键，并确认录制后短按/长按均可触发预期流程。
 - 2026-06-22 已按用户提供的新腾讯云 SecretId / SecretKey 更新本机 ASR 私有配置：
   - 配置文件：`~/Library/Application Support/NexVoice/TencentCloudASR.json`。
   - 文件权限：`600`。

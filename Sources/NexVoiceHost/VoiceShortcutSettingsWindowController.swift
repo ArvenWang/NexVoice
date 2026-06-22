@@ -9,12 +9,20 @@ final class VoiceShortcutSettingsWindowController: NSWindowController {
     private let recordButton = NSButton(title: "录制新快捷键", target: nil, action: nil)
     private let resetButton = NSButton(title: "恢复右 Alt", target: nil, action: nil)
     private var localMonitor: Any?
+    private var globalMonitor: Any?
+    private var isRecording = false
     private var shortcut: VoiceShortcut
     private let onShortcutChanged: (VoiceShortcut) -> Void
+    private let onRecordingStateChanged: (Bool) -> Void
 
-    init(shortcut: VoiceShortcut, onShortcutChanged: @escaping (VoiceShortcut) -> Void) {
+    init(
+        shortcut: VoiceShortcut,
+        onShortcutChanged: @escaping (VoiceShortcut) -> Void,
+        onRecordingStateChanged: @escaping (Bool) -> Void = { _ in }
+    ) {
         self.shortcut = shortcut
         self.onShortcutChanged = onShortcutChanged
+        self.onRecordingStateChanged = onRecordingStateChanged
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 420, height: 180),
             styleMask: [.titled, .closable],
@@ -24,6 +32,7 @@ final class VoiceShortcutSettingsWindowController: NSWindowController {
         window.title = "NexVoice 快捷键"
         window.isReleasedWhenClosed = false
         super.init(window: window)
+        window.delegate = self
         buildContent()
         refresh()
     }
@@ -83,22 +92,23 @@ final class VoiceShortcutSettingsWindowController: NSWindowController {
 
     @objc private func beginRecording() {
         stopRecording()
+        window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
         hintLabel.stringValue = "正在录制：按右 Alt，或按下一个快捷键组合。"
         recordButton.isEnabled = false
+        isRecording = true
+        onRecordingStateChanged(true)
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
             guard let self else { return event }
-            if event.type == .flagsChanged,
-               event.keyCode == VoiceShortcut.rightOptionKeyCode,
-               event.modifierFlags.contains(.option) {
-                self.applyShortcut(.rightOptionKey)
-                return nil
-            }
-            if event.type == .keyDown {
-                let modifiers = Self.modifiers(from: event.modifierFlags)
-                self.applyShortcut(.keyCombo(keyCode: event.keyCode, modifiers: modifiers))
+            if self.applyRecordingEvent(event) {
                 return nil
             }
             return event
+        }
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
+            Task { @MainActor [weak self] in
+                self?.applyRecordingEvent(event)
+            }
         }
     }
 
@@ -114,11 +124,35 @@ final class VoiceShortcutSettingsWindowController: NSWindowController {
     }
 
     private func stopRecording() {
+        let wasRecording = isRecording
         if let localMonitor {
             NSEvent.removeMonitor(localMonitor)
         }
+        if let globalMonitor {
+            NSEvent.removeMonitor(globalMonitor)
+        }
         localMonitor = nil
+        globalMonitor = nil
+        isRecording = false
         recordButton.isEnabled = true
+        if wasRecording {
+            onRecordingStateChanged(false)
+        }
+    }
+
+    @discardableResult
+    private func applyRecordingEvent(_ event: NSEvent) -> Bool {
+        guard isRecording else { return false }
+        guard let eventType = Self.recordingEventType(from: event.type),
+              let shortcut = VoiceShortcutRecordingPolicy.shortcut(
+                for: eventType,
+                keyCode: event.keyCode,
+                flags: Self.cgFlags(from: event.modifierFlags)
+              ) else {
+            return false
+        }
+        applyShortcut(shortcut)
+        return true
     }
 
     private func refresh() {
@@ -126,12 +160,30 @@ final class VoiceShortcutSettingsWindowController: NSWindowController {
         hintLabel.stringValue = "当前快捷键：\(shortcut.displayTitle)。按一次开始，再按一次结束。"
     }
 
-    private static func modifiers(from flags: NSEvent.ModifierFlags) -> Set<VoiceShortcutModifier> {
-        var modifiers: Set<VoiceShortcutModifier> = []
-        if flags.contains(.command) { modifiers.insert(.command) }
-        if flags.contains(.shift) { modifiers.insert(.shift) }
-        if flags.contains(.option) { modifiers.insert(.option) }
-        if flags.contains(.control) { modifiers.insert(.control) }
-        return modifiers
+    private static func cgFlags(from modifiers: NSEvent.ModifierFlags) -> CGEventFlags {
+        var flags: CGEventFlags = []
+        if modifiers.contains(.command) { flags.insert(.maskCommand) }
+        if modifiers.contains(.shift) { flags.insert(.maskShift) }
+        if modifiers.contains(.option) { flags.insert(.maskAlternate) }
+        if modifiers.contains(.control) { flags.insert(.maskControl) }
+        if modifiers.contains(.function) { flags.insert(.maskSecondaryFn) }
+        return flags
+    }
+
+    private static func recordingEventType(from eventType: NSEvent.EventType) -> VoiceShortcutRecordingEventType? {
+        switch eventType {
+        case .keyDown:
+            return .keyDown
+        case .flagsChanged:
+            return .flagsChanged
+        default:
+            return nil
+        }
+    }
+}
+
+extension VoiceShortcutSettingsWindowController: NSWindowDelegate {
+    func windowWillClose(_ notification: Notification) {
+        stopRecording()
     }
 }
