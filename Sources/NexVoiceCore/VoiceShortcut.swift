@@ -56,11 +56,13 @@ public enum VoiceShortcut: Codable, Equatable, Sendable {
         case .rightOptionKey:
             return "右 Alt"
         case .keyCombo(let keyCode, let modifiers):
+            let keyName = Self.keyName(for: keyCode)
+            guard !modifiers.isEmpty else { return keyName }
             let ordered = VoiceShortcutModifier.displayOrder
                 .filter { modifiers.contains($0) }
                 .map(\.symbol)
                 .joined()
-            return "\(ordered) \(Self.keyName(for: keyCode))"
+            return "\(ordered) \(keyName)"
         }
     }
 
@@ -160,7 +162,6 @@ public enum VoiceShortcutRecordingPolicy {
             return .rightOptionKey
         case .keyDown:
             let modifiers = VoiceShortcut.modifiers(from: flags)
-            guard !modifiers.isEmpty else { return nil }
             return .keyCombo(
                 keyCode: keyCode,
                 modifiers: modifiers

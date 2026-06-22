@@ -5,7 +5,7 @@ import NexVoiceCore
 @MainActor
 final class VoiceShortcutSettingsWindowController: NSWindowController {
     private let shortcutLabel = NSTextField(labelWithString: "")
-    private let hintLabel = NSTextField(labelWithString: "点击录制后，按右 Alt 或带修饰键的快捷键。")
+    private let hintLabel = NSTextField(labelWithString: "点击录制后，按右 Alt、外设独立按键，或任意快捷键组合。")
     private let recordButton = NSButton(title: "录制新快捷键", target: nil, action: nil)
     private let resetButton = NSButton(title: "恢复右 Alt", target: nil, action: nil)
     private var localMonitor: Any?
@@ -94,7 +94,7 @@ final class VoiceShortcutSettingsWindowController: NSWindowController {
         stopRecording()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        hintLabel.stringValue = "正在录制：按右 Alt，或按 Control / Option / Command / Shift + 一个按键。"
+        hintLabel.stringValue = "正在录制：按右 Alt、外设独立按键，或 Control / Option / Command / Shift + 一个按键。"
         recordButton.isEnabled = false
         isRecording = true
         onRecordingStateChanged(true)

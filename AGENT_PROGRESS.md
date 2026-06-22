@@ -1,10 +1,10 @@
 # NexVoice 当前进展
 
-更新时间：2026-06-21
+更新时间：2026-06-22
 
 ## 当前状态
 
-- 当前工作目录：`/Users/nefish/Desktop/Coding/NexVoice`。
+- 当前工作目录：`/Users/nefish/Desktop/WorkSpace/Coding/NexVoice`。
 - 项目形态：SwiftPM macOS 菜单栏 App，核心模块为 `NexVoiceCore`，宿主为 `NexVoiceHost`。
 - 默认入口：短按右 Alt 开始语音输入，再按一次结束；长按右 Alt 约 0.55 秒进入看屏自动回复；ESC 可取消录音、等待 final、AI 改写或看屏回复中的会话。
 - 当前主链路：腾讯云实时 ASR `16k_zh_en` -> DeepSeek `deepseek-v4-flash` 最终整理 -> 写入当前聚焦输入框。
@@ -44,6 +44,27 @@
 
 ## 本轮完成
 
+- 2026-06-22 修复外设“裸按键”无法作为快捷键的问题：
+  - 背景：用户需要把其他设备上绑定的独立按键录制为 NexVoice 快捷键，该按键不是键盘上的常规组合键，但会被 macOS 识别为一个独立 keyCode。
+  - 根因：上一轮为了避免普通键盘字母误触，`VoiceShortcutRecordingPolicy` 把没有 Control / Option / Command / Shift 的 `keyDown` 全部过滤掉，导致外设裸按键无法录制。
+  - 修复：`keyDown` 现在允许录制为空修饰键的 `.keyCombo(keyCode, modifiers: [])`；这类快捷键仍走 Carbon `RegisterEventHotKey` 系统全局热键注册，而不是回到不稳定的轮询/普通全局监听。
+  - 如果裸按键被系统或其他 App 占用，注册失败时仍会显示 `快捷键被占用`；普通键盘裸字母也可被录制，但不建议用户把常用输入键当全局快捷键。
+  - 修复裸按键显示名：例如 `K` 不再显示成带前导空格的 ` K`。
+  - 设置窗口提示已更新，明确支持 `右 Alt`、`外设独立按键` 或常规组合键。
+  - 新增/更新快捷键测试：裸按键录制、裸按键显示名、裸按键走 registered hotkey 策略。
+  - `swift test --filter VoiceShortcut --quiet` 通过 16 个快捷键测试。
+  - `swift test --quiet` 通过 129 个测试。
+  - `swift build --product NexVoiceApp` 通过。
+  - `git diff --check` 通过；仓库精确密钥扫描通过，未发现本机 AppID / SecretId / SecretKey 精确值写入仓库。
+  - 已 bump 版本：`0.1.4 (5)` -> `0.1.5 (6)`。
+  - 已重新构建并安装带本机配置的 `/Applications/NexVoice.app`，当前运行 PID 为 `86824`。
+  - 安装版 `codesign --verify --deep --strict /Applications/NexVoice.app` 通过。
+  - 安装版 `plutil -lint /Applications/NexVoice.app/Contents/Info.plist` 通过。
+  - 新 DMG：`dist/NexVoice-0.1.5-build6-bare-hotkey-fix-embedded-keys-20260622.dmg`。
+  - 新 DMG SHA256：`43754a917c34d5634b1fb87c6557a56cc17cf6ae66c4d0abc78c8e05809533b4`。
+  - 已挂载新 DMG 验证根目录包含 `NexVoice.app` 和 `Applications` 快捷入口，App 内含 DeepSeek / TencentCloudASR 嵌入配置且字段完整。
+  - `hdiutil verify dist/NexVoice-0.1.5-build6-bare-hotkey-fix-embedded-keys-20260622.dmg` 通过。
+  - 仍需用户真实验收：用目标外设裸按键录制快捷键，关闭设置窗口后在桌面、浏览器、微信、Codex 等 App 中测试短按开始/结束语音输入，以及长按看屏回复。
 - 2026-06-22 修复快捷键设置录制不稳定问题：
   - 根因 1：自定义组合键在 keyUp 阶段仍用 modifierFlags 做精确匹配；macOS 的 keyUp 事件经常已经不带修饰键，导致“录上了但松开后不能触发”。
   - 根因 2：快捷键设置窗口只用 local event monitor；窗口失焦或事件未派发给 NexVoice 时，录制状态下按键会没有反应。

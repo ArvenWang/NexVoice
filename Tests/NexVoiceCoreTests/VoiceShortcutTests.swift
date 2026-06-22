@@ -29,6 +29,12 @@ import Testing
     #expect(shortcut.displayTitle == "⇧⌘ Space")
 }
 
+@Test func voiceShortcutDisplayTitleOmitsLeadingSpaceForBareKey() {
+    let shortcut = VoiceShortcut.keyCombo(keyCode: 40, modifiers: [])
+
+    #expect(shortcut.displayTitle == "K")
+}
+
 @Test func voiceShortcutRoundTripsThroughUserDefaultsPayload() throws {
     let shortcut = VoiceShortcut.keyCombo(keyCode: 0, modifiers: [.option, .control])
 
@@ -101,14 +107,14 @@ import Testing
     #expect(shortcut == .keyCombo(keyCode: 49, modifiers: [.control, .shift]))
 }
 
-@Test func recordingPolicyIgnoresPlainKeyDownWithoutModifiers() {
+@Test func recordingPolicyCapturesBareExternalKeyFromKeyDown() {
     let shortcut = VoiceShortcutRecordingPolicy.shortcut(
         for: .keyDown,
         keyCode: 40,
         flags: []
     )
 
-    #expect(shortcut == nil)
+    #expect(shortcut == .keyCombo(keyCode: 40, modifiers: []))
 }
 
 @Test func keyCombosUseRegisteredGlobalHotKeyStrategy() {
@@ -116,6 +122,11 @@ import Testing
     #expect(
         VoiceShortcutGlobalCapturePolicy.strategy(
             for: .keyCombo(keyCode: 49, modifiers: [.control])
+        ) == .registeredHotKey
+    )
+    #expect(
+        VoiceShortcutGlobalCapturePolicy.strategy(
+            for: .keyCombo(keyCode: 40, modifiers: [])
         ) == .registeredHotKey
     )
 }
