@@ -137,6 +137,10 @@ public enum VoiceShortcut: Codable, Equatable, Sendable {
         case 46: return "M"
         case 49: return "Space"
         case 53: return "Esc"
+        case 64: return "F17"
+        case 79: return "F18"
+        case 80: return "F19"
+        case 90: return "F20"
         default: return "Key \(keyCode)"
         }
     }
@@ -182,6 +186,13 @@ public enum VoiceShortcutGlobalCapturePolicy {
             return .registeredHotKey
         case .functionKey, .rightOptionKey:
             return .eventMonitor
+        }
+    }
+
+    public static func allowsEventMonitorFallback(for shortcut: VoiceShortcut) -> Bool {
+        switch shortcut {
+        case .functionKey, .rightOptionKey, .keyCombo:
+            return true
         }
     }
 }

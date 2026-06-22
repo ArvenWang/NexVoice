@@ -12,6 +12,7 @@ final class GlobalVoiceShortcutMonitor {
     private var carbonEventHandlerRef: EventHandlerRef?
     private var shortcut: VoiceShortcut = .default
     private var usesRegisteredHotKey = false
+    private var allowsEventMonitorFallback = false
     private var isPressed = false
     private var isCancelPressed = false
     private var didTriggerLongPress = false
@@ -37,6 +38,7 @@ final class GlobalVoiceShortcutMonitor {
         self.onCancel = onCancel
 
         usesRegisteredHotKey = VoiceShortcutGlobalCapturePolicy.strategy(for: shortcut) == .registeredHotKey
+        allowsEventMonitorFallback = VoiceShortcutGlobalCapturePolicy.allowsEventMonitorFallback(for: shortcut)
         let didRegisterHotKey = usesRegisteredHotKey
             ? registerCarbonHotKey(for: shortcut)
             : true
@@ -81,6 +83,7 @@ final class GlobalVoiceShortcutMonitor {
         didTriggerLongPress = false
         isCancelPressed = false
         usesRegisteredHotKey = false
+        allowsEventMonitorFallback = false
     }
 
     private func removeMonitor(_ monitor: inout Any?) {
@@ -108,7 +111,7 @@ final class GlobalVoiceShortcutMonitor {
             onCancel?()
             return
         }
-        guard !usesRegisteredHotKey else { return }
+        guard allowsEventMonitorFallback else { return }
 
         guard shortcut.matchesKeyEvent(
             keyCode: event.keyCode,
@@ -124,7 +127,7 @@ final class GlobalVoiceShortcutMonitor {
             isCancelPressed = false
             return
         }
-        guard !usesRegisteredHotKey else { return }
+        guard allowsEventMonitorFallback else { return }
 
         guard isPressed, shortcut.matchesKeyReleaseEvent(keyCode: event.keyCode) else {
             return
@@ -133,7 +136,7 @@ final class GlobalVoiceShortcutMonitor {
     }
 
     private func handleFlagsChanged(_ event: NSEvent) {
-        guard !usesRegisteredHotKey else { return }
+        guard allowsEventMonitorFallback else { return }
         let flags = Self.cgFlags(from: event.modifierFlags)
         if shortcut.matchesModifierKeyPress(keyCode: event.keyCode, flags: flags), !isPressed {
             beginShortcutPress()

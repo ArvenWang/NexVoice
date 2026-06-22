@@ -35,6 +35,12 @@ import Testing
     #expect(shortcut.displayTitle == "K")
 }
 
+@Test func voiceShortcutDisplayTitleNamesFunctionKeys() {
+    let shortcut = VoiceShortcut.keyCombo(keyCode: 64, modifiers: [])
+
+    #expect(shortcut.displayTitle == "F17")
+}
+
 @Test func voiceShortcutRoundTripsThroughUserDefaultsPayload() throws {
     let shortcut = VoiceShortcut.keyCombo(keyCode: 0, modifiers: [.option, .control])
 
@@ -128,6 +134,15 @@ import Testing
         VoiceShortcutGlobalCapturePolicy.strategy(
             for: .keyCombo(keyCode: 40, modifiers: [])
         ) == .registeredHotKey
+    )
+}
+
+@Test func registeredHotKeyShortcutsKeepEventMonitorFallback() {
+    #expect(VoiceShortcutGlobalCapturePolicy.allowsEventMonitorFallback(for: .rightOptionKey))
+    #expect(
+        VoiceShortcutGlobalCapturePolicy.allowsEventMonitorFallback(
+            for: .keyCombo(keyCode: 64, modifiers: [])
+        )
     )
 }
 

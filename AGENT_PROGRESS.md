@@ -44,6 +44,26 @@
 
 ## 本轮完成
 
+- 2026-06-22 继续修复外设裸按键“能录制但不能激活”的问题：
+  - 用户实测截图显示快捷键可录制为 `Key 64`，说明设置窗口录制和 `UserDefaults` 写入已成功；本机偏好里也确认保存为 `{"keyCombo":{"modifiers":[],"keyCode":64}}`。
+  - 根因：上一版让裸按键走 Carbon `RegisterEventHotKey`，但 `GlobalVoiceShortcutMonitor` 在 `usesRegisteredHotKey == true` 时直接忽略普通 `NSEvent` 全局 keyDown/keyUp；对这类外设/扩展功能键，Carbon 可能注册成功但实际不回调，导致“能录上但触发不了”。
+  - 修复：注册热键路径继续保留，同时新增 `VoiceShortcutGlobalCapturePolicy.allowsEventMonitorFallback`；自定义组合键和裸按键即使走 Carbon，也会保留原有 `NSEvent.addGlobalMonitorForEvents` / local monitor 回退。
+  - 这不是轮询，也不是另起一套复杂快捷键系统；只是避免 Carbon 成功注册后把本来可用的事件通道关掉。
+  - 根据 macOS Carbon `Events.h`，`keyCode 64` 是 `kVK_F17`；已补充 F17 / F18 / F19 / F20 显示名，设置窗口以后会显示 `F17`，不再显示 `Key 64`。
+  - 新增测试：注册热键快捷键必须保留 event monitor fallback；`keyCode 64` 显示为 `F17`。
+  - `swift test --filter VoiceShortcut --quiet` 通过 17 个快捷键测试。
+  - `swift test --quiet` 通过 131 个测试。
+  - `swift build --product NexVoiceApp` 通过。
+  - `git diff --check` 通过；仓库精确密钥扫描通过，未发现本机 AppID / SecretId / SecretKey 精确值写入仓库。
+  - 已 bump 版本：`0.1.5 (6)` -> `0.1.6 (7)`。
+  - 已重新构建并安装带本机配置的 `/Applications/NexVoice.app`，当前运行 PID 为 `30562`。
+  - 安装版 `codesign --verify --deep --strict /Applications/NexVoice.app` 通过。
+  - 安装版 `plutil -lint /Applications/NexVoice.app/Contents/Info.plist` 通过。
+  - 新 DMG：`dist/NexVoice-0.1.6-build7-hotkey-event-fallback-embedded-keys-20260622.dmg`。
+  - 新 DMG SHA256：`983f7a9ebcad3db15e23aee64462a10b7c44292aa911e63e6c3b9e96acba2d9d`。
+  - 已挂载新 DMG 验证根目录包含 `NexVoice.app` 和 `Applications` 快捷入口，App 内含 DeepSeek / TencentCloudASR 嵌入配置且字段完整。
+  - `hdiutil verify dist/NexVoice-0.1.6-build7-hotkey-event-fallback-embedded-keys-20260622.dmg` 通过。
+  - 仍需用户真实验收：重新打开快捷键设置应看到 `F17`；关闭设置窗口后，在桌面和其他 App 中按外设键应能触发开始/结束语音输入。
 - 2026-06-22 修复外设“裸按键”无法作为快捷键的问题：
   - 背景：用户需要把其他设备上绑定的独立按键录制为 NexVoice 快捷键，该按键不是键盘上的常规组合键，但会被 macOS 识别为一个独立 keyCode。
   - 根因：上一轮为了避免普通键盘字母误触，`VoiceShortcutRecordingPolicy` 把没有 Control / Option / Command / Shift 的 `keyDown` 全部过滤掉，导致外设裸按键无法录制。
