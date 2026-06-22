@@ -44,6 +44,18 @@
 
 ## 本轮完成
 
+- 2026-06-22 已按用户提供的新腾讯云 SecretId / SecretKey 更新本机 ASR 私有配置：
+  - 配置文件：`~/Library/Application Support/NexVoice/TencentCloudASR.json`。
+  - 文件权限：`600`。
+  - 配置完整性检查通过：AppID、SecretId、SecretKey 三项均存在。
+  - 没有把 AppID、SecretId、SecretKey 精确值写入仓库或文档。
+  - 重新构建 `dist/NexVoice.app`，并完整替换安装到 `/Applications/NexVoice.app`。
+  - 替换安装时先删除旧 `/Applications/NexVoice.app`，避免覆盖旧 bundle 后签名资源残留。
+  - `codesign --verify --deep --strict /Applications/NexVoice.app` 通过。
+  - `plutil -lint /Applications/NexVoice.app/Contents/Info.plist` 通过。
+  - 已启动 `/Applications/NexVoice.app`，当前 `NexVoiceApp` 进程 PID 为 `60702`。
+  - `swift test --filter TencentCloud --quiet` 通过 10 个腾讯云相关测试。
+  - 尚未由用户做真实语音验收；仍需用户实际按右 Alt 测试腾讯云实时 ASR、DeepSeek 整理、文本写回和延迟体感。
 - 修复普通语音输入首次显示时波形浮层“先矮后被拉高”的问题：
   - 原因是紧凑波形态外框高度为 `44`，但内部需要 `上内边距 14 + 波形高度 28 + 下内边距 14 = 56`。
   - 将 `compactPanelSize.height` 和默认 `panelSize.height` 调整为 `56`，让面板第一次出现时就满足内部约束。
