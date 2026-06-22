@@ -56,6 +56,15 @@
   - 已启动 `/Applications/NexVoice.app`，当前 `NexVoiceApp` 进程 PID 为 `60702`。
   - `swift test --filter TencentCloud --quiet` 通过 10 个腾讯云相关测试。
   - 尚未由用户做真实语音验收；仍需用户实际按右 Alt 测试腾讯云实时 ASR、DeepSeek 整理、文本写回和延迟体感。
+- 2026-06-22 重新打包明确包含本机 Key/API 配置的私用 DMG：
+  - 现有 `dist/NexVoice-0.1.2-build3-deepseek-configured.dmg` 已验证包含嵌入配置。
+  - 现有 `dist/NexVoice-0.1.2-build3-latest.dmg` 已验证不包含嵌入配置，不应作为私用 Key 包分发。
+  - 新包路径：`dist/NexVoice-0.1.2-build3-embedded-keys-20260622.dmg`。
+  - SHA256：`d446d73711c0097a6ff247e0222bd461e0393dcf515da5fa528016e3cedd2874`。
+  - 使用 `./scripts/build_app.sh release --embed-local-keys` 构建，确认 `NexVoice.app/Contents/Resources/NexVoiceEmbeddedConfig/DeepSeek.json` 和 `TencentCloudASR.json` 均存在且字段完整。
+  - 已挂载新 DMG 验证根目录包含 `NexVoice.app` 与 `Applications` 快捷入口。
+  - 已验证 DMG 内 `NexVoice.app` 签名通过。
+  - `hdiutil verify dist/NexVoice-0.1.2-build3-embedded-keys-20260622.dmg` 通过。
 - 修复普通语音输入首次显示时波形浮层“先矮后被拉高”的问题：
   - 原因是紧凑波形态外框高度为 `44`，但内部需要 `上内边距 14 + 波形高度 28 + 下内边距 14 = 56`。
   - 将 `compactPanelSize.height` 和默认 `panelSize.height` 调整为 `56`，让面板第一次出现时就满足内部约束。
