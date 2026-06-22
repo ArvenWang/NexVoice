@@ -63,6 +63,24 @@
   - 已挂载新 DMG 验证根目录包含 `NexVoice.app` 和 `Applications` 快捷入口，App 内含 DeepSeek / TencentCloudASR 嵌入配置且字段完整。
   - `hdiutil verify dist/NexVoice-0.1.3-build4-shortcut-recording-fix-embedded-keys-20260622.dmg` 通过。
   - 仍需用户真实验收：打开“设置快捷键...”，多次录制右 Alt、`Control + Space`、`Option + Space` 等组合键，并确认录制后短按/长按均可触发预期流程。
+- 2026-06-22 继续修复“录制窗口内可用、关闭后到其他 App 失效”的问题：
+  - 进一步根因：设置窗口内靠 local monitor 捕捉按键，所以当场看起来可用；关闭窗口后进入其他 App 时，普通 `NSEvent.addGlobalMonitorForEvents` 对自定义组合键不够稳定，尤其是系统/输入法可能接管的组合键。
+  - 修复策略：右 Alt / Fn 这种单修饰键仍走 `NSEvent.flagsChanged`；自定义组合键统一走 Carbon `RegisterEventHotKey`，使用系统全局热键注册机制。
+  - 新增 `VoiceShortcutGlobalCapturePolicy`，明确 `.keyCombo` 使用 `.registeredHotKey`，右 Alt / Fn 使用 `.eventMonitor`。
+  - 如果系统或其他 App 已占用该快捷键，注册失败后会显示 `快捷键被占用`，避免用户以为录制成功但外部场景不可用。
+  - 录制策略改为忽略裸按键；只能录制右 Alt，或至少包含一个修饰键的组合键，避免把普通字母键注册为全局热键。
+  - `swift test --filter VoiceShortcut --quiet` 通过 15 个快捷键测试。
+  - `swift test --quiet` 通过 128 个测试。
+  - `swift build --product NexVoiceApp` 通过。
+  - 已 bump 版本：`0.1.3 (4)` -> `0.1.4 (5)`。
+  - 已重新构建并安装带本机配置的 `/Applications/NexVoice.app`，当前运行 PID 为 `56878`。
+  - 安装版 `codesign --verify --deep --strict /Applications/NexVoice.app` 通过。
+  - 安装版 `plutil -lint /Applications/NexVoice.app/Contents/Info.plist` 通过。
+  - 新 DMG：`dist/NexVoice-0.1.4-build5-global-hotkey-fix-embedded-keys-20260622.dmg`。
+  - 新 DMG SHA256：`6670c16c69489e8d71f7cbc262414073c8cc56d4647aae87b9a7410d2c21d66c`。
+  - 已挂载新 DMG 验证根目录包含 `NexVoice.app` 和 `Applications` 快捷入口，App 内含 DeepSeek / TencentCloudASR 嵌入配置且字段完整。
+  - `hdiutil verify dist/NexVoice-0.1.4-build5-global-hotkey-fix-embedded-keys-20260622.dmg` 通过。
+  - 仍需用户真实验收：重点测试录制窗口关闭后，在桌面、浏览器、微信、Codex 等 App 中触发新快捷键。
 - 2026-06-22 已按用户提供的新腾讯云 SecretId / SecretKey 更新本机 ASR 私有配置：
   - 配置文件：`~/Library/Application Support/NexVoice/TencentCloudASR.json`。
   - 文件权限：`600`。

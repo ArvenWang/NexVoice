@@ -159,10 +159,28 @@ public enum VoiceShortcutRecordingPolicy {
             }
             return .rightOptionKey
         case .keyDown:
+            let modifiers = VoiceShortcut.modifiers(from: flags)
+            guard !modifiers.isEmpty else { return nil }
             return .keyCombo(
                 keyCode: keyCode,
-                modifiers: VoiceShortcut.modifiers(from: flags)
+                modifiers: modifiers
             )
+        }
+    }
+}
+
+public enum VoiceShortcutGlobalCaptureStrategy: Equatable, Sendable {
+    case eventMonitor
+    case registeredHotKey
+}
+
+public enum VoiceShortcutGlobalCapturePolicy {
+    public static func strategy(for shortcut: VoiceShortcut) -> VoiceShortcutGlobalCaptureStrategy {
+        switch shortcut {
+        case .keyCombo:
+            return .registeredHotKey
+        case .functionKey, .rightOptionKey:
+            return .eventMonitor
         }
     }
 }

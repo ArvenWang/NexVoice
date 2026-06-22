@@ -101,6 +101,25 @@ import Testing
     #expect(shortcut == .keyCombo(keyCode: 49, modifiers: [.control, .shift]))
 }
 
+@Test func recordingPolicyIgnoresPlainKeyDownWithoutModifiers() {
+    let shortcut = VoiceShortcutRecordingPolicy.shortcut(
+        for: .keyDown,
+        keyCode: 40,
+        flags: []
+    )
+
+    #expect(shortcut == nil)
+}
+
+@Test func keyCombosUseRegisteredGlobalHotKeyStrategy() {
+    #expect(VoiceShortcutGlobalCapturePolicy.strategy(for: .rightOptionKey) == .eventMonitor)
+    #expect(
+        VoiceShortcutGlobalCapturePolicy.strategy(
+            for: .keyCombo(keyCode: 49, modifiers: [.control])
+        ) == .registeredHotKey
+    )
+}
+
 @Test func toggleShortcutStartsWhenIdleAndFinishesWhenRunning() {
     #expect(VoiceShortcutTriggerPolicy.action(for: .idle) == .begin)
     #expect(VoiceShortcutTriggerPolicy.action(for: .running) == .finish)

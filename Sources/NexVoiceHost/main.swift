@@ -162,7 +162,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startShortcutMonitor() {
-        shortcutMonitor.start(
+        let didStart = shortcutMonitor.start(
             shortcut: voiceShortcut,
             onTrigger: { [weak self] in
                 self?.handleShortcutTriggered()
@@ -177,6 +177,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.cancelCurrentSessionFromEscape()
             }
         )
+        if !didStart {
+            captionPanel.showStatus("快捷键被占用", isError: true, autoHideDelay: 1.8)
+        }
         refreshMenuState()
     }
 

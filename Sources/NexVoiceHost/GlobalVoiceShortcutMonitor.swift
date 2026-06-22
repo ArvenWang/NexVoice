@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import CoreGraphics
 import NexVoiceCore
 
@@ -7,7 +8,10 @@ final class GlobalVoiceShortcutMonitor {
     private var globalKeyMonitor: Any?
     private var globalFlagsMonitor: Any?
     private var localEventMonitor: Any?
+    private var carbonHotKeyRef: EventHotKeyRef?
+    private var carbonEventHandlerRef: EventHandlerRef?
     private var shortcut: VoiceShortcut = .default
+    private var usesRegisteredHotKey = false
     private var isPressed = false
     private var isCancelPressed = false
     private var didTriggerLongPress = false
@@ -32,6 +36,11 @@ final class GlobalVoiceShortcutMonitor {
         self.onLongPressEnded = onLongPressEnded
         self.onCancel = onCancel
 
+        usesRegisteredHotKey = VoiceShortcutGlobalCapturePolicy.strategy(for: shortcut) == .registeredHotKey
+        let didRegisterHotKey = usesRegisteredHotKey
+            ? registerCarbonHotKey(for: shortcut)
+            : true
+
         globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
             Task { @MainActor [weak self] in
                 self?.handle(event)
@@ -49,7 +58,7 @@ final class GlobalVoiceShortcutMonitor {
             return event
         }
 
-        return true
+        return didRegisterHotKey
     }
 
     func updateShortcut(_ shortcut: VoiceShortcut) {
@@ -58,6 +67,7 @@ final class GlobalVoiceShortcutMonitor {
     }
 
     func stop() {
+        unregisterCarbonHotKey()
         removeMonitor(&globalKeyMonitor)
         removeMonitor(&globalFlagsMonitor)
         removeMonitor(&localEventMonitor)
@@ -70,6 +80,7 @@ final class GlobalVoiceShortcutMonitor {
         isPressed = false
         didTriggerLongPress = false
         isCancelPressed = false
+        usesRegisteredHotKey = false
     }
 
     private func removeMonitor(_ monitor: inout Any?) {
@@ -97,6 +108,7 @@ final class GlobalVoiceShortcutMonitor {
             onCancel?()
             return
         }
+        guard !usesRegisteredHotKey else { return }
 
         guard shortcut.matchesKeyEvent(
             keyCode: event.keyCode,
@@ -112,6 +124,7 @@ final class GlobalVoiceShortcutMonitor {
             isCancelPressed = false
             return
         }
+        guard !usesRegisteredHotKey else { return }
 
         guard isPressed, shortcut.matchesKeyReleaseEvent(keyCode: event.keyCode) else {
             return
@@ -120,11 +133,73 @@ final class GlobalVoiceShortcutMonitor {
     }
 
     private func handleFlagsChanged(_ event: NSEvent) {
+        guard !usesRegisteredHotKey else { return }
         let flags = Self.cgFlags(from: event.modifierFlags)
         if shortcut.matchesModifierKeyPress(keyCode: event.keyCode, flags: flags), !isPressed {
             beginShortcutPress()
         } else if shortcut.matchesModifierKeyRelease(keyCode: event.keyCode, flags: flags) {
             endShortcutPress()
+        }
+    }
+
+    private func handleRegisteredHotKeyPressed() {
+        guard !isPressed else { return }
+        beginShortcutPress()
+    }
+
+    private func handleRegisteredHotKeyReleased() {
+        guard isPressed else { return }
+        endShortcutPress()
+    }
+
+    private func registerCarbonHotKey(for shortcut: VoiceShortcut) -> Bool {
+        guard case .keyCombo(let keyCode, let modifiers) = shortcut else { return false }
+        unregisterCarbonHotKey()
+
+        var eventTypes = [
+            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed)),
+            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased))
+        ]
+        let selfPointer = Unmanaged.passUnretained(self).toOpaque()
+        let handlerStatus = InstallEventHandler(
+            GetApplicationEventTarget(),
+            Self.carbonHotKeyHandler,
+            eventTypes.count,
+            &eventTypes,
+            selfPointer,
+            &carbonEventHandlerRef
+        )
+        guard handlerStatus == noErr else {
+            return false
+        }
+
+        let hotKeyID = EventHotKeyID(
+            signature: Self.carbonHotKeySignature,
+            id: Self.carbonHotKeyID
+        )
+        let registerStatus = RegisterEventHotKey(
+            UInt32(keyCode),
+            Self.carbonModifierFlags(from: modifiers),
+            hotKeyID,
+            GetApplicationEventTarget(),
+            0,
+            &carbonHotKeyRef
+        )
+        if registerStatus != noErr {
+            unregisterCarbonHotKey()
+            return false
+        }
+        return true
+    }
+
+    private func unregisterCarbonHotKey() {
+        if let carbonHotKeyRef {
+            UnregisterEventHotKey(carbonHotKeyRef)
+            self.carbonHotKeyRef = nil
+        }
+        if let carbonEventHandlerRef {
+            RemoveEventHandler(carbonEventHandlerRef)
+            self.carbonEventHandlerRef = nil
         }
     }
 
@@ -165,6 +240,33 @@ final class GlobalVoiceShortcutMonitor {
         if modifiers.contains(.control) { flags.insert(.maskControl) }
         if modifiers.contains(.function) { flags.insert(.maskSecondaryFn) }
         return flags
+    }
+
+    private static func carbonModifierFlags(from modifiers: Set<VoiceShortcutModifier>) -> UInt32 {
+        var flags: UInt32 = 0
+        if modifiers.contains(.command) { flags |= UInt32(cmdKey) }
+        if modifiers.contains(.shift) { flags |= UInt32(shiftKey) }
+        if modifiers.contains(.option) { flags |= UInt32(optionKey) }
+        if modifiers.contains(.control) { flags |= UInt32(controlKey) }
+        return flags
+    }
+
+    private static let carbonHotKeySignature: OSType = 0x4E585653
+    private static let carbonHotKeyID: UInt32 = 1
+    private static let carbonHotKeyHandler: EventHandlerUPP = { _, event, userData in
+        guard let event, let userData else { return noErr }
+        let monitor = Unmanaged<GlobalVoiceShortcutMonitor>
+            .fromOpaque(userData)
+            .takeUnretainedValue()
+        let eventKind = GetEventKind(event)
+        Task { @MainActor in
+            if eventKind == UInt32(kEventHotKeyPressed) {
+                monitor.handleRegisteredHotKeyPressed()
+            } else if eventKind == UInt32(kEventHotKeyReleased) {
+                monitor.handleRegisteredHotKeyReleased()
+            }
+        }
+        return noErr
     }
 
     private static let escapeKeyCode: UInt16 = 53
