@@ -70,40 +70,42 @@ public enum VoiceDictionaryLearningPolicy {
         let corrected = correctedText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !incorrect.isEmpty, !corrected.isEmpty else { return false }
         guard incorrect != corrected else { return false }
-        guard incorrect.count <= 64, corrected.count <= 64 else { return false }
+        guard incorrect.count <= 64 else { return false }
         guard !isOnlyPunctuationOrWhitespace(incorrect),
               !isOnlyPunctuationOrWhitespace(corrected) else {
             return false
         }
         guard !looksLikeSentence(incorrect) else { return false }
-        guard !looksLikeSentence(corrected) else { return false }
-        guard !isGenericCommonWord(corrected) else { return false }
+        guard isValidDictionaryTerm(corrected) else { return false }
 
         return true
     }
 
-    public static func shouldAutoSaveLooseProperNounCorrection(
-        incorrectText: String,
-        correctedText: String
-    ) -> Bool {
-        let incorrect = incorrectText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let corrected = correctedText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard shouldAskModel(incorrectText: incorrect, correctedText: corrected) else {
+    public static func isValidDictionaryTerm(_ text: String) -> Bool {
+        let term = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !term.isEmpty,
+              term.count <= 32,
+              !term.contains("|"),
+              !term.contains("\n"),
+              !term.contains("\r"),
+              !isOnlyPunctuationOrWhitespace(term),
+              !looksLikeSentence(term),
+              !isGenericCommonWord(term) else {
             return false
         }
 
-        if isSingleLatinToken(incorrect),
-           isSingleLatinToken(corrected),
-           corrected.count >= 5,
-           looksLikeASRMisrecognitionPair(incorrect: incorrect, corrected: corrected) {
-            return true
+        let tokens = term.split { $0.isWhitespace }
+        guard tokens.count <= 4 else { return false }
+
+        if containsCJK(term), looksLikeChineseSentenceFragment(term) {
+            return false
         }
 
-        if containsMixedCaseOrDigit(corrected) {
-            return true
+        if containsCJK(term), tokens.count > 1, !containsLatinLetterOrDigit(term) {
+            return false
         }
 
-        return false
+        return true
     }
 
     private static func singleReplacement(from baseline: String, to edited: String) -> (old: String, new: String)? {
@@ -165,6 +167,38 @@ public enum VoiceDictionaryLearningPolicy {
         return text.rangeOfCharacter(from: sentenceMarkers) != nil
     }
 
+    private static func containsCJK(_ text: String) -> Bool {
+        text.unicodeScalars.contains { scalar in
+            (0x4E00...0x9FFF).contains(Int(scalar.value))
+        }
+    }
+
+    private static func containsLatinLetterOrDigit(_ text: String) -> Bool {
+        text.unicodeScalars.contains {
+            CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789").contains($0)
+        }
+    }
+
+    private static func looksLikeChineseSentenceFragment(_ text: String) -> Bool {
+        let compact = text.replacingOccurrences(of: " ", with: "")
+        let phraseMarkers = [
+            "帮我", "给我", "看一下", "查一下", "查看", "有没有", "上有没有",
+            "一下", "哪只", "那只", "是不是", "可不可以", "能不能", "需要",
+            "应该", "不要", "把它", "帮我到", "最新"
+        ]
+        if phraseMarkers.contains(where: { compact.contains($0) }) {
+            return true
+        }
+
+        let first = compact.first
+        if compact.count > 3,
+           let first,
+           ["是", "要", "把", "帮", "查", "看"].contains(first) {
+            return true
+        }
+        return false
+    }
+
     private static func isLatinLetterOrDigit(_ character: Character) -> Bool {
         character.unicodeScalars.allSatisfy {
             CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789").contains($0)
@@ -185,62 +219,4 @@ public enum VoiceDictionaryLearningPolicy {
         return commonWords.contains(normalized)
     }
 
-    private static func isSingleLatinToken(_ text: String) -> Bool {
-        guard !text.isEmpty else { return false }
-        return text.unicodeScalars.allSatisfy {
-            CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_").contains($0)
-        }
-    }
-
-    private static func containsMixedCaseOrDigit(_ text: String) -> Bool {
-        let scalars = text.unicodeScalars
-        let hasLowercase = scalars.contains { CharacterSet.lowercaseLetters.contains($0) }
-        let hasUppercase = scalars.contains { CharacterSet.uppercaseLetters.contains($0) }
-        let hasDigit = scalars.contains { CharacterSet.decimalDigits.contains($0) }
-        return (hasLowercase && hasUppercase) || hasDigit || text.contains("-") || text.contains("_")
-    }
-
-    private static func looksLikeASRMisrecognitionPair(incorrect: String, corrected: String) -> Bool {
-        let lhs = incorrect.lowercased()
-        let rhs = corrected.lowercased()
-        guard lhs != rhs,
-              !isGenericCommonWord(lhs),
-              !isGenericCommonWord(rhs) else {
-            return false
-        }
-
-        let distance = levenshteinDistance(lhs, rhs)
-        let longerLength = max(lhs.count, rhs.count)
-        guard longerLength > 0 else { return false }
-
-        if longerLength <= 8 {
-            return distance <= 2
-        }
-        return Double(distance) / Double(longerLength) <= 0.28
-    }
-
-    private static func levenshteinDistance(_ lhs: String, _ rhs: String) -> Int {
-        let lhsCharacters = Array(lhs)
-        let rhsCharacters = Array(rhs)
-        guard !lhsCharacters.isEmpty else { return rhsCharacters.count }
-        guard !rhsCharacters.isEmpty else { return lhsCharacters.count }
-
-        var previousRow = Array(0...rhsCharacters.count)
-        var currentRow = Array(repeating: 0, count: rhsCharacters.count + 1)
-
-        for lhsIndex in 1...lhsCharacters.count {
-            currentRow[0] = lhsIndex
-            for rhsIndex in 1...rhsCharacters.count {
-                let substitutionCost = lhsCharacters[lhsIndex - 1] == rhsCharacters[rhsIndex - 1] ? 0 : 1
-                currentRow[rhsIndex] = min(
-                    previousRow[rhsIndex] + 1,
-                    currentRow[rhsIndex - 1] + 1,
-                    previousRow[rhsIndex - 1] + substitutionCost
-                )
-            }
-            previousRow = currentRow
-        }
-
-        return previousRow[rhsCharacters.count]
-    }
 }

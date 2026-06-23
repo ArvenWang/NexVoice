@@ -23,6 +23,113 @@ public enum VoiceApplicationRewriteProfile: String, Codable, Sendable {
     }
 }
 
+public struct VoiceAppWorkflow: Equatable, Sendable {
+    public let identifier: String
+    public let title: String
+    public let profile: VoiceApplicationRewriteProfile
+    public let promptHint: String
+
+    public init(
+        identifier: String,
+        title: String,
+        profile: VoiceApplicationRewriteProfile,
+        promptHint: String
+    ) {
+        self.identifier = identifier
+        self.title = title
+        self.profile = profile
+        self.promptHint = promptHint
+    }
+}
+
+public enum VoiceAppWorkflowPolicy {
+    public static func workflow(
+        appName: String?,
+        bundleIdentifier: String?,
+        focusedElementDescription: String?,
+        focusedTextPreview: String?
+    ) -> VoiceAppWorkflow {
+        let haystack = [
+            appName,
+            bundleIdentifier,
+            focusedElementDescription,
+            focusedTextPreview
+        ]
+        .compactMap { $0?.lowercased() }
+        .joined(separator: " ")
+        let bundle = bundleIdentifier?.lowercased()
+        let app = appName?.lowercased()
+
+        if bundle == "com.openai.codex"
+            || haystack.contains("cursor")
+            || haystack.contains("xcode")
+            || haystack.contains("vscode")
+            || haystack.contains("visual studio code")
+            || haystack.contains("chatgpt")
+            || haystack.contains("claude")
+            || haystack.contains("windsurf") {
+            return VoiceAppWorkflow(
+                identifier: "agent-collaboration",
+                title: "开发协作",
+                profile: .agentCollaboration,
+                promptHint: "开发协作工作流：保留用户的任务、约束、判断和问题边界；不要把需求改成泛泛建议。"
+            )
+        }
+
+        if haystack.contains("mail")
+            || haystack.contains("outlook")
+            || haystack.contains("spark")
+            || haystack.contains("airmail")
+            || haystack.contains("gmail") {
+            return VoiceAppWorkflow(
+                identifier: "email-reply",
+                title: "邮件回复",
+                profile: .emailReply,
+                promptHint: "邮件工作流：表达礼貌清楚、有分寸；补齐必要称呼或收尾时要克制，不要模板化。"
+            )
+        }
+
+        if haystack.contains("twitter")
+            || app == "x"
+            || haystack.contains("x.com")
+            || haystack.contains("tweet")
+            || haystack.contains("reddit")
+            || haystack.contains("youtube")
+            || haystack.contains("threads")
+            || haystack.contains("post composer")
+            || haystack.contains("comment box") {
+            return VoiceAppWorkflow(
+                identifier: "social",
+                title: "社交发布",
+                profile: .socialConversation,
+                promptHint: "社交工作流：像真人自然发言，避免翻译腔、营销腔和过度正式；允许更强的网感。"
+            )
+        }
+
+        if haystack.contains("slack")
+            || haystack.contains("discord")
+            || haystack.contains("telegram")
+            || haystack.contains("wechat")
+            || haystack.contains("weixin")
+            || haystack.contains("lark")
+            || haystack.contains("feishu") {
+            return VoiceAppWorkflow(
+                identifier: "work-chat",
+                title: "即时沟通",
+                profile: .workChat,
+                promptHint: "即时沟通工作流：简洁自然，行动明确，少铺垫；不要把短消息扩写成正式文档。"
+            )
+        }
+
+        return VoiceAppWorkflow(
+            identifier: "general",
+            title: "通用输入",
+            profile: .general,
+            promptHint: "通用输入工作流：清晰自然，少加工，可直接发送。"
+        )
+    }
+}
+
 public struct VoiceRewriteContext: Equatable, Sendable {
     public let sourceApplicationName: String?
     public let sourceApplicationBundleIdentifier: String?
@@ -51,66 +158,24 @@ public struct VoiceRewriteContext: Equatable, Sendable {
     }
 
     public var applicationProfile: VoiceApplicationRewriteProfile {
-        let haystack = [
-            sourceApplicationName,
-            sourceApplicationBundleIdentifier,
-            focusedElementDescription,
-            focusedTextPreview
-        ]
-        .compactMap { $0?.lowercased() }
-        .joined(separator: " ")
+        applicationWorkflow.profile
+    }
 
-        let appName = sourceApplicationName?.lowercased()
-
-        if haystack.contains("mail")
-            || haystack.contains("outlook")
-            || haystack.contains("spark")
-            || haystack.contains("airmail")
-            || haystack.contains("gmail") {
-            return .emailReply
-        }
-
-        if haystack.contains("slack")
-            || haystack.contains("discord")
-            || haystack.contains("telegram")
-            || haystack.contains("wechat")
-            || haystack.contains("weixin")
-            || haystack.contains("lark")
-            || haystack.contains("feishu") {
-            return .workChat
-        }
-
-        if haystack.contains("twitter")
-            || appName == "x"
-            || haystack.contains("x.com")
-            || haystack.contains("tweet")
-            || haystack.contains("reddit")
-            || haystack.contains("youtube")
-            || haystack.contains("threads")
-            || haystack.contains("post composer")
-            || haystack.contains("comment box") {
-            return .socialConversation
-        }
-
-        if haystack.contains("cursor")
-            || haystack.contains("xcode")
-            || haystack.contains("vscode")
-            || haystack.contains("visual studio code")
-            || haystack.contains("chatgpt")
-            || haystack.contains("claude")
-            || haystack.contains("codex")
-            || haystack.contains("windsurf") {
-            return .agentCollaboration
-        }
-
-        return .general
+    public var applicationWorkflow: VoiceAppWorkflow {
+        VoiceAppWorkflowPolicy.workflow(
+            appName: sourceApplicationName,
+            bundleIdentifier: sourceApplicationBundleIdentifier,
+            focusedElementDescription: focusedElementDescription,
+            focusedTextPreview: focusedTextPreview
+        )
     }
 
     public var promptBlock: String {
         var lines = [
             "当前上下文：",
             "- 应用：\(sourceApplicationName ?? "未知")",
-            "- 类型：\(applicationProfile.promptHint)",
+            "- 工作流：\(applicationWorkflow.title)",
+            "- 类型：\(applicationWorkflow.promptHint)",
             "- 模式：\(selectedTextMode ? "选中文本+语音指令" : "普通语音输入")"
         ]
 
@@ -133,7 +198,7 @@ public struct VoiceRewriteContext: Equatable, Sendable {
         [
             sourceApplicationName ?? "unknown_app",
             sourceApplicationBundleIdentifier ?? "unknown_bundle",
-            applicationProfile.rawValue,
+            applicationWorkflow.identifier,
             selectedTextMode ? "selected_text" : "normal_input",
             personalDictionary.isEmpty ? "no_dictionary" : "dictionary_terms_\(personalDictionary.terms.count)"
         ]
@@ -147,7 +212,7 @@ public struct VoiceRewriteContext: Equatable, Sendable {
         if let applicationName = sourceApplicationName, !applicationName.isEmpty {
             return "app:\(applicationName.lowercased())"
         }
-        return "profile:\(applicationProfile.rawValue)"
+        return "workflow:\(applicationWorkflow.identifier)"
     }
 
     private static func cleaned(_ value: String?) -> String? {

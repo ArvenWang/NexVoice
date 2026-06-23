@@ -13,11 +13,12 @@ import Testing
     )
 
     #expect(context.applicationProfile == .agentCollaboration)
-    #expect(context.promptBlock.contains("Agent/开发协作"))
+    #expect(context.applicationWorkflow.identifier == "agent-collaboration")
+    #expect(context.promptBlock.contains("开发协作"))
     #expect(context.promptBlock.contains("请帮我改一下这个功能"))
     #expect(context.promptBlock.contains("只作上下文"))
     #expect(!context.promptBlock.contains("用户个人词库"))
-    #expect(context.diagnosticsSummary.contains("agentCollaboration"))
+    #expect(context.diagnosticsSummary.contains("agent-collaboration"))
 }
 
 @Test func rewriteContextDetectsEmailProfile() {
@@ -39,7 +40,7 @@ import Testing
     )
 
     #expect(context.applicationProfile == .socialConversation)
-    #expect(context.promptBlock.contains("社交评论"))
+    #expect(context.promptBlock.contains("社交发布"))
 }
 
 @Test func rewriteTimeoutPolicyGivesMoreTimeToSelectedTextCommands() {

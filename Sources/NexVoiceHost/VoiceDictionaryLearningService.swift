@@ -43,18 +43,6 @@ final class VoiceDictionaryLearningService: Sendable {
     }
 
     func learn(_ candidate: VoiceDictionaryCorrectionCandidate) async -> VoiceDictionaryLearningResult? {
-        if VoiceDictionaryLearningPolicy.shouldAutoSaveLooseProperNounCorrection(
-            incorrectText: candidate.incorrectText,
-            correctedText: candidate.correctedText
-        ) {
-            return save(
-                term: candidate.correctedText,
-                alias: candidate.incorrectText,
-                note: "english_or_special_term：用户修改后自动学习",
-                contextKey: candidate.contextKey
-            )
-        }
-
         guard let judgment = try? await judge(candidate),
               judgment.shouldSave,
               judgment.confidence >= 0.45,
@@ -62,17 +50,23 @@ final class VoiceDictionaryLearningService: Sendable {
             return nil
         }
 
-        let alias = candidate.incorrectText == term ? [] : [candidate.incorrectText]
         let note = judgment.category.map { "\($0)：\(judgment.reason ?? "用户修改后自动学习")" }
             ?? judgment.reason
             ?? "用户修改后自动学习"
-        return save(term: term, alias: alias.first, note: note, contextKey: candidate.contextKey)
+        return save(
+            term: term,
+            observedText: candidate.incorrectText,
+            note: note,
+            confidence: judgment.confidence,
+            contextKey: candidate.contextKey
+        )
     }
 
     private func save(
         term: String,
-        alias: String?,
+        observedText: String,
         note: String,
+        confidence: Double,
         contextKey: String
     ) -> VoiceDictionaryLearningResult? {
         let existingDictionary = VoicePersonalDictionaryStore.load(fileURL: dictionaryFileURL)
@@ -84,19 +78,31 @@ final class VoiceDictionaryLearningService: Sendable {
                 phrase: term,
                 weight: 8,
                 note: note,
-                aliases: alias.map { [$0] } ?? [],
+                aliases: [],
                 contextWeights: [contextKey: 1]
             ),
             fileURL: dictionaryFileURL
         ) else {
             return nil
         }
+        if observedText.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(term) != .orderedSame {
+            _ = try? VoicePersonalDictionaryStore.upsertCorrection(
+                VoicePersonalDictionaryCorrection(
+                    observedText: observedText,
+                    targetTerm: term,
+                    note: note,
+                    confidence: confidence,
+                    contextWeights: [contextKey: 1]
+                ),
+                fileURL: dictionaryFileURL
+            )
+        }
         let savedTerm = updatedDictionary.terms.first {
             $0.phrase.caseInsensitiveCompare(term) == .orderedSame
         }
         return VoiceDictionaryLearningResult(
             term: savedTerm?.phrase ?? term,
-            alias: alias,
+            alias: nil,
             wasInserted: wasInserted
         )
     }
@@ -143,7 +149,7 @@ final class VoiceDictionaryLearningService: Sendable {
         let term = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !term.isEmpty,
               term.count <= 64,
-              VoiceDictionaryLearningPolicy.shouldAskModel(incorrectText: "x", correctedText: term) else {
+              VoiceDictionaryLearningPolicy.isValidDictionaryTerm(term) else {
             return nil
         }
         return term
@@ -151,8 +157,10 @@ final class VoiceDictionaryLearningService: Sendable {
 
     private static let systemPrompt = """
     你是语音输入个人词典学习判断器。用户把 NexVoice 输出中的 A 改成 B 后，你判断 B 是否应该进入个人词典。
-    初期规则保持宽松：如果 B 像人名、产品名、项目名、品牌名、公司名、模型名、技术术语、文件名、特殊拼写或固定大小写，就倾向保存。
-    不保存：标点、语序、普通润色、普通同义改写、整句重写、常见普通词。
+    只保存 B 中真正应该作为热词的“词或短词组”，例如人名、产品名、项目名、品牌名、公司名、模型名、技术术语、文件名、特殊拼写或固定大小写。
+    如果 ASR 把短技术词误听成普通中文短语，例如把 HTML 误听成“是那只天猫”，只要用户改回的是明确技术词，可以保存改正后的技术词 HTML。
+    不保存：标点、语序、普通润色、普通同义改写、整句重写、普通句子片段、用户指令、常见普通词。
+    term 必须只包含应该保存的词或短词组，不要返回整句，不要返回 A，不要返回别名或错误读音。
     只返回 JSON，不要解释。
     """
 

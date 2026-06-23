@@ -18,12 +18,15 @@ final class TencentCloudRealtimeTranscriptionService: @unchecked Sendable {
     private var eventHandler: (@Sendable (VoiceRealtimeEvent) -> Void)?
     private var webSocketTask: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
+    private var audioKeepAliveTask: Task<Void, Never>?
     private var transcriptBuffer = TencentCloudRealtimeTranscriptBuffer()
     private var currentSessionID: String?
     private var startedAt: Date?
     private var finishRequestedAt: Date?
     private var hasReceivedTranscript = false
     private var didRequestFinish = false
+    private var lastAudioFrameSentAt: Date?
+    private var keepAliveFrameBytes = 1_280
 
     init(
         captureService: AudioCaptureService = AudioCaptureService(),
@@ -72,6 +75,8 @@ final class TencentCloudRealtimeTranscriptionService: @unchecked Sendable {
             self.finishRequestedAt = nil
             self.hasReceivedTranscript = false
             self.didRequestFinish = false
+            self.lastAudioFrameSentAt = startedAt
+            self.keepAliveFrameBytes = Int(16_000 * frameDurationMilliseconds / 1_000) * MemoryLayout<Int16>.size
             self.webSocketTask = task
             self.stateStorage = .running
         }
@@ -96,6 +101,7 @@ final class TencentCloudRealtimeTranscriptionService: @unchecked Sendable {
             ) { [weak self] frame in
                 self?.send(frame)
             }
+            startAudioKeepAlive(sessionID: sessionID)
             emit(.sessionStarted)
         } catch {
             fail(message: error.localizedDescription)
@@ -142,10 +148,52 @@ final class TencentCloudRealtimeTranscriptionService: @unchecked Sendable {
         emit(.audioLevelUpdated(VoiceAudioLevelMeter.normalizedLevel(
             pcm16LittleEndian: frame.pcm16LittleEndian
         )))
+        lock.withLock {
+            lastAudioFrameSentAt = Date()
+            keepAliveFrameBytes = max(keepAliveFrameBytes, frame.pcm16LittleEndian.count)
+        }
         webSocketTask?.send(.data(frame.pcm16LittleEndian)) { [weak self] error in
             guard let error else { return }
             self?.fail(message: "腾讯云 ASR 音频发送失败：\(error.localizedDescription)")
         }
+    }
+
+    private func startAudioKeepAlive(sessionID: String) {
+        audioKeepAliveTask?.cancel()
+        audioKeepAliveTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard let self else { return }
+                let snapshot = self.lock.withLock {
+                    (
+                        state: self.stateStorage,
+                        lastSentAt: self.lastAudioFrameSentAt,
+                        frameBytes: self.keepAliveFrameBytes
+                    )
+                }
+                guard snapshot.state == .running else { return }
+                let elapsed = snapshot.lastSentAt.map { Date().timeIntervalSince($0) } ?? 0
+                guard elapsed >= 4.8 else { continue }
+                self.sendKeepAliveFrame(byteCount: snapshot.frameBytes, sessionID: sessionID)
+            }
+        }
+    }
+
+    private func sendKeepAliveFrame(byteCount: Int, sessionID: String) {
+        guard state == .running else { return }
+        let data = Data(repeating: 0, count: max(2, byteCount))
+        lock.withLock {
+            lastAudioFrameSentAt = Date()
+        }
+        webSocketTask?.send(.data(data)) { [weak self] error in
+            guard let error else { return }
+            self?.fail(message: "腾讯云 ASR 静音保活失败：\(error.localizedDescription)")
+        }
+        logASR(
+            sessionID: sessionID,
+            event: "audio_keepalive",
+            frameDurationMilliseconds: nil
+        )
     }
 
     private func receiveLoop(task: URLSessionWebSocketTask) async {
@@ -307,6 +355,7 @@ final class TencentCloudRealtimeTranscriptionService: @unchecked Sendable {
             finishRequestedAt = nil
             hasReceivedTranscript = false
             didRequestFinish = false
+            lastAudioFrameSentAt = nil
             return task
         }
         if cancelWebSocket {
@@ -314,6 +363,8 @@ final class TencentCloudRealtimeTranscriptionService: @unchecked Sendable {
         }
         receiveTask?.cancel()
         receiveTask = nil
+        audioKeepAliveTask?.cancel()
+        audioKeepAliveTask = nil
     }
 
     private func logASR(

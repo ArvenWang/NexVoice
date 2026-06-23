@@ -15,6 +15,7 @@ final class VoiceCaptionPanelController {
     private let loadingStackView = NSStackView()
     private let loadingIndicator = NSProgressIndicator()
     private let loadingLabel = NSTextField(labelWithString: "AI 整理中")
+    private let retryButton = NSButton(title: "重试", target: nil, action: nil)
     private var currentPanelSize = VoiceWaveformDisplayPolicy.panelSize
     private var rootWidthConstraint: NSLayoutConstraint?
     private var rootHeightConstraint: NSLayoutConstraint?
@@ -30,6 +31,7 @@ final class VoiceCaptionPanelController {
     private var showsWaveformInTextPanel = true
     private var contextualAnchorRect: CGRect?
     private var isInteractiveContextualResult = false
+    private var retryAction: (() -> Void)?
     private var outsideClickGlobalMonitor: Any?
     private var outsideClickLocalMonitor: Any?
 
@@ -71,6 +73,8 @@ final class VoiceCaptionPanelController {
     func showLoading(_ message: String, anchorRect: CGRect? = nil) {
         cancelScheduledHide()
         configurePassivePanel(anchorRect: anchorRect)
+        retryAction = nil
+        retryButton.isHidden = true
         loadingLabel.stringValue = message
         loadingLabel.textColor = NSColor.white.withAlphaComponent(0.82)
         loadingIndicator.isHidden = false
@@ -90,6 +94,8 @@ final class VoiceCaptionPanelController {
     func showPassiveMessage(_ message: String, anchorRect: CGRect? = nil) {
         cancelScheduledHide()
         configurePassivePanel(anchorRect: anchorRect)
+        retryAction = nil
+        retryButton.isHidden = true
         if panel.isVisible,
            loadingStackView.isHidden == false,
            stackView.isHidden,
@@ -117,6 +123,8 @@ final class VoiceCaptionPanelController {
     func showStatus(_ message: String, isError: Bool, autoHideDelay: TimeInterval = 1.0) {
         cancelScheduledHide()
         configurePassivePanel()
+        retryAction = nil
+        retryButton.isHidden = true
         loadingIndicator.stopAnimation(nil)
         loadingIndicator.isHidden = true
         loadingLabel.stringValue = message
@@ -133,6 +141,34 @@ final class VoiceCaptionPanelController {
         }
         transition(from: stackView, to: loadingStackView)
         updatePanelSize(to: statusPanelSize(for: message), animated: true)
+        scheduleHide(after: autoHideDelay)
+    }
+
+    func showRetryStatus(
+        _ message: String,
+        actionTitle: String = "重试",
+        autoHideDelay: TimeInterval = 8.0,
+        onRetry: @escaping () -> Void
+    ) {
+        cancelScheduledHide()
+        configureRetryPanel()
+        retryAction = onRetry
+        loadingIndicator.stopAnimation(nil)
+        loadingIndicator.isHidden = true
+        retryButton.title = actionTitle
+        retryButton.isHidden = false
+        loadingLabel.stringValue = message
+        loadingLabel.textColor = NSColor.systemRed.withAlphaComponent(0.9)
+        waveformView.setActive(false)
+        waveformView.setAmplitude(0)
+        if !panel.isVisible {
+            positionOverlay()
+            preparePanelEntrance()
+            panel.orderFrontRegardless()
+            animatePanelEntranceIfNeeded()
+        }
+        transition(from: stackView, to: loadingStackView)
+        updatePanelSize(to: retryPanelSize(message: message, actionTitle: actionTitle), animated: true)
         scheduleHide(after: autoHideDelay)
     }
 
@@ -168,6 +204,8 @@ final class VoiceCaptionPanelController {
     func reset() {
         cancelScheduledHide()
         configurePassivePanel()
+        retryAction = nil
+        retryButton.isHidden = true
         loadingIndicator.stopAnimation(nil)
         loadingStackView.isHidden = true
         loadingStackView.alphaValue = 0
@@ -367,12 +405,20 @@ final class VoiceCaptionPanelController {
         loadingIndicator.isIndeterminate = true
         loadingIndicator.translatesAutoresizingMaskIntoConstraints = false
 
+        retryButton.target = self
+        retryButton.action = #selector(performRetryAction)
+        retryButton.bezelStyle = .rounded
+        retryButton.controlSize = .small
+        retryButton.font = .systemFont(ofSize: 12, weight: .semibold)
+        retryButton.isHidden = true
+
         loadingLabel.font = .systemFont(ofSize: VoiceWaveformDisplayPolicy.transcriptFontSize, weight: .medium)
         loadingLabel.textColor = NSColor.white.withAlphaComponent(0.82)
         loadingLabel.lineBreakMode = .byTruncatingTail
 
         loadingStackView.addArrangedSubview(loadingIndicator)
         loadingStackView.addArrangedSubview(loadingLabel)
+        loadingStackView.addArrangedSubview(retryButton)
 
         NSLayoutConstraint.activate([
             loadingIndicator.widthAnchor.constraint(equalToConstant: 14),
@@ -386,6 +432,19 @@ final class VoiceCaptionPanelController {
         let width = min(
             VoiceWaveformDisplayPolicy.expandedPanelWidth,
             max(VoiceWaveformDisplayPolicy.statusPanelSize.width, measuredWidth + 40)
+        )
+        return CGSize(width: width, height: VoiceWaveformDisplayPolicy.statusPanelSize.height)
+    }
+
+    private func retryPanelSize(message: String, actionTitle: String) -> CGSize {
+        let font = NSFont.systemFont(ofSize: VoiceWaveformDisplayPolicy.transcriptFontSize, weight: .medium)
+        let buttonFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        let measuredWidth = ceil((message as NSString).size(withAttributes: [.font: font]).width)
+            + ceil((actionTitle as NSString).size(withAttributes: [.font: buttonFont]).width)
+            + 76
+        let width = min(
+            VoiceWaveformDisplayPolicy.expandedPanelWidth,
+            max(VoiceWaveformDisplayPolicy.statusPanelSize.width, measuredWidth)
         )
         return CGSize(width: width, height: VoiceWaveformDisplayPolicy.statusPanelSize.height)
     }
@@ -686,6 +745,14 @@ final class VoiceCaptionPanelController {
         removeOutsideClickMonitor()
     }
 
+    private func configureRetryPanel() {
+        isInteractiveContextualResult = false
+        contextualAnchorRect = nil
+        panel.ignoresMouseEvents = false
+        transcriptTextView.isSelectable = false
+        removeOutsideClickMonitor()
+    }
+
     private func configureInteractiveContextualResult(anchorRect: CGRect?) {
         isInteractiveContextualResult = true
         contextualAnchorRect = anchorRect
@@ -752,6 +819,8 @@ final class VoiceCaptionPanelController {
     private func hideImmediately() {
         hideWorkItem?.cancel()
         hideWorkItem = nil
+        retryAction = nil
+        retryButton.isHidden = true
         configurePassivePanel()
         waveformView.setActive(false)
         waveformView.setAmplitude(0)
@@ -778,6 +847,13 @@ final class VoiceCaptionPanelController {
                 rootView?.alphaValue = 1
             }
         }
+    }
+
+    @objc private func performRetryAction() {
+        guard let retryAction else { return }
+        self.retryAction = nil
+        retryButton.isHidden = true
+        retryAction()
     }
 
     private func cancelScheduledHide() {

@@ -22,10 +22,7 @@ public struct VoicePersonalDictionaryTerm: Codable, Equatable, Sendable {
     }
 
     public var isValid: Bool {
-        !phrase.isEmpty
-            && !phrase.contains("|")
-            && !phrase.contains("\n")
-            && !phrase.contains("\r")
+        VoiceDictionaryLearningPolicy.isValidDictionaryTerm(phrase)
     }
 
     public var hotwordFragment: String? {
@@ -61,7 +58,7 @@ public struct VoicePersonalDictionaryTerm: Codable, Equatable, Sendable {
         }
     }
 
-    private static func normalizedContextWeights(_ contextWeights: [String: Int]) -> [String: Int] {
+    static func normalizedContextWeights(_ contextWeights: [String: Int]) -> [String: Int] {
         contextWeights.reduce(into: [:]) { result, item in
             let key = item.key.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             guard !key.isEmpty, item.value > 0 else { return }
@@ -70,15 +67,60 @@ public struct VoicePersonalDictionaryTerm: Codable, Equatable, Sendable {
     }
 }
 
+public struct VoicePersonalDictionaryCorrection: Codable, Equatable, Sendable {
+    public let observedText: String
+    public let targetTerm: String
+    public let note: String?
+    public let confidence: Double
+    public let contextWeights: [String: Int]
+
+    public init(
+        observedText: String,
+        targetTerm: String,
+        note: String? = nil,
+        confidence: Double = 0.5,
+        contextWeights: [String: Int] = [:]
+    ) {
+        self.observedText = observedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.targetTerm = targetTerm.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.note = note?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.confidence = min(1, max(0, confidence))
+        self.contextWeights = VoicePersonalDictionaryTerm.normalizedContextWeights(contextWeights)
+    }
+
+    public var isValid: Bool {
+        guard !observedText.isEmpty,
+              !targetTerm.isEmpty,
+              observedText.caseInsensitiveCompare(targetTerm) != .orderedSame,
+              observedText.count <= 64,
+              !observedText.contains("|"),
+              !observedText.contains("\n"),
+              !observedText.contains("\r") else {
+            return false
+        }
+        return VoiceDictionaryLearningPolicy.isValidDictionaryTerm(targetTerm)
+    }
+}
+
 public struct VoicePersonalDictionary: Codable, Equatable, Sendable {
     public let terms: [VoicePersonalDictionaryTerm]
+    public let corrections: [VoicePersonalDictionaryCorrection]
 
-    public init(terms: [VoicePersonalDictionaryTerm] = []) {
+    public init(
+        terms: [VoicePersonalDictionaryTerm] = [],
+        corrections: [VoicePersonalDictionaryCorrection] = []
+    ) {
         self.terms = Array(terms.filter(\.isValid).prefix(3_000))
+        let termKeys = Set(self.terms.map { $0.phrase.lowercased() })
+        self.corrections = Array(
+            corrections
+                .filter { $0.isValid && termKeys.contains($0.targetTerm.lowercased()) }
+                .prefix(5_000)
+        )
     }
 
     public var isEmpty: Bool {
-        terms.isEmpty
+        terms.isEmpty && corrections.isEmpty
     }
 
     public var hotwordList: String? {
@@ -115,6 +157,19 @@ public struct VoicePersonalDictionary: Codable, Equatable, Sendable {
 public enum VoicePersonalDictionaryStore {
     private struct FileDictionary: Decodable {
         let terms: [FileTerm]
+        let corrections: [FileCorrection]?
+    }
+
+    private struct PersistedDictionary: Encodable {
+        let terms: [PersistedTerm]
+        let corrections: [VoicePersonalDictionaryCorrection]
+    }
+
+    private struct PersistedTerm: Encodable {
+        let phrase: String
+        let weight: Int
+        let note: String?
+        let contextWeights: [String: Int]
     }
 
     private struct FileTerm: Decodable {
@@ -152,6 +207,14 @@ public enum VoicePersonalDictionaryStore {
         }
     }
 
+    private struct FileCorrection: Decodable {
+        let observedText: String
+        let targetTerm: String
+        let note: String?
+        let confidence: Double?
+        let contextWeights: [String: Int]?
+    }
+
     public static var defaultFileURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library", isDirectory: true)
@@ -173,7 +236,16 @@ public enum VoicePersonalDictionaryStore {
                         phrase: $0.phrase,
                         weight: $0.weight ?? 8,
                         note: $0.note,
-                        aliases: $0.aliases ?? [],
+                        aliases: [],
+                        contextWeights: $0.contextWeights ?? [:]
+                    )
+                },
+                corrections: (fileDictionary.corrections ?? []).map {
+                    VoicePersonalDictionaryCorrection(
+                        observedText: $0.observedText,
+                        targetTerm: $0.targetTerm,
+                        note: $0.note,
+                        confidence: $0.confidence ?? 0.5,
                         contextWeights: $0.contextWeights ?? [:]
                     )
                 }
@@ -192,7 +264,18 @@ public enum VoicePersonalDictionaryStore {
     public static func save(_ dictionary: VoicePersonalDictionary, fileURL: URL = defaultFileURL) throws {
         let directoryURL = fileURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-        let data = try JSONEncoder.prettyDictionaryEncoder.encode(dictionary)
+        let persistedDictionary = PersistedDictionary(
+            terms: dictionary.terms.map {
+                PersistedTerm(
+                    phrase: $0.phrase,
+                    weight: $0.weight,
+                    note: $0.note,
+                    contextWeights: $0.contextWeights
+                )
+            },
+            corrections: dictionary.corrections
+        )
+        let data = try JSONEncoder.prettyDictionaryEncoder.encode(persistedDictionary)
         try data.write(to: fileURL, options: [.atomic])
     }
 
@@ -209,7 +292,6 @@ public enum VoicePersonalDictionaryStore {
         for existing in current.terms {
             if existing.phrase.lowercased() == normalizedPhrase {
                 didMerge = true
-                let aliases = existing.aliases + term.aliases
                 let note = term.note?.isEmpty == false ? term.note : existing.note
                 let contextWeights = mergeContextWeights(existing.contextWeights, term.contextWeights)
                 mergedTerms.append(
@@ -217,7 +299,7 @@ public enum VoicePersonalDictionaryStore {
                         phrase: term.phrase,
                         weight: max(existing.weight, term.weight),
                         note: note,
-                        aliases: aliases,
+                        aliases: [],
                         contextWeights: contextWeights
                     )
                 )
@@ -230,7 +312,51 @@ public enum VoicePersonalDictionaryStore {
             mergedTerms.insert(term, at: 0)
         }
 
-        let updated = VoicePersonalDictionary(terms: mergedTerms)
+        let updated = VoicePersonalDictionary(
+            terms: mergedTerms,
+            corrections: current.corrections
+        )
+        try save(updated, fileURL: fileURL)
+        return updated
+    }
+
+    @discardableResult
+    public static func upsertCorrection(
+        _ correction: VoicePersonalDictionaryCorrection,
+        fileURL: URL = defaultFileURL
+    ) throws -> VoicePersonalDictionary {
+        let current = load(fileURL: fileURL)
+        let observedKey = correction.observedText.lowercased()
+        let targetKey = correction.targetTerm.lowercased()
+        var mergedCorrections: [VoicePersonalDictionaryCorrection] = []
+        var didMerge = false
+
+        for existing in current.corrections {
+            if existing.observedText.lowercased() == observedKey,
+               existing.targetTerm.lowercased() == targetKey {
+                didMerge = true
+                mergedCorrections.append(
+                    VoicePersonalDictionaryCorrection(
+                        observedText: existing.observedText,
+                        targetTerm: existing.targetTerm,
+                        note: correction.note?.isEmpty == false ? correction.note : existing.note,
+                        confidence: max(existing.confidence, correction.confidence),
+                        contextWeights: mergeContextWeights(existing.contextWeights, correction.contextWeights)
+                    )
+                )
+            } else {
+                mergedCorrections.append(existing)
+            }
+        }
+
+        if !didMerge {
+            mergedCorrections.insert(correction, at: 0)
+        }
+
+        let updated = VoicePersonalDictionary(
+            terms: current.terms,
+            corrections: mergedCorrections
+        )
         try save(updated, fileURL: fileURL)
         return updated
     }
@@ -247,7 +373,31 @@ public enum VoicePersonalDictionaryStore {
 
         let current = load(fileURL: fileURL)
         let updated = VoicePersonalDictionary(
-            terms: current.terms.filter { $0.phrase.lowercased() != normalizedPhrase }
+            terms: current.terms.filter { $0.phrase.lowercased() != normalizedPhrase },
+            corrections: current.corrections.filter { $0.targetTerm.lowercased() != normalizedPhrase }
+        )
+        try save(updated, fileURL: fileURL)
+        return updated
+    }
+
+    @discardableResult
+    public static func deleteCorrection(
+        observedText: String,
+        targetTerm: String,
+        fileURL: URL = defaultFileURL
+    ) throws -> VoicePersonalDictionary {
+        let observedKey = observedText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let targetKey = targetTerm.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !observedKey.isEmpty, !targetKey.isEmpty else {
+            return load(fileURL: fileURL)
+        }
+
+        let current = load(fileURL: fileURL)
+        let updated = VoicePersonalDictionary(
+            terms: current.terms,
+            corrections: current.corrections.filter {
+                !($0.observedText.lowercased() == observedKey && $0.targetTerm.lowercased() == targetKey)
+            }
         )
         try save(updated, fileURL: fileURL)
         return updated

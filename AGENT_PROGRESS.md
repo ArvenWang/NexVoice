@@ -1,16 +1,45 @@
 # NexVoice 当前进展
 
-更新时间：2026-06-22
+更新时间：2026-06-24
 
 ## 当前状态
 
-- 当前工作目录：`/Users/nefish/Desktop/WorkSpace/Coding/NexVoice`。
+- 当前工作目录：`/Users/nefish/Desktop/Coding/NexVoice`。
 - 项目形态：SwiftPM macOS 菜单栏 App，核心模块为 `NexVoiceCore`，宿主为 `NexVoiceHost`。
 - 默认入口：短按右 Alt 开始语音输入，再按一次结束；长按右 Alt 约 0.55 秒进入看屏自动回复；ESC 可取消录音、等待 final、AI 改写或看屏回复中的会话。
 - 当前主链路：腾讯云实时 ASR `16k_zh_en` -> DeepSeek `deepseek-v4-flash` 最终整理 -> 写入当前聚焦输入框。
 - 本地 SenseVoice Small 和 WhisperKit large-v3 保留为兜底和质量对照，不是当前默认主链路。
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
+
+## 本轮完成（2026-06-24：统一设置窗口与交互修复）
+
+- 新增统一设置窗口 `VoiceSettingsWindowController`，菜单 `设置...` 打开完整设置窗口，菜单 `个人词库...` 直接进入词库页。
+- 设置窗口包含：
+  - `输入设置`：快捷键显示、录制、恢复、输出语言切换。
+  - `输出模式`：四种输出模式卡片，点击后写回真实 `VoiceRewriteStyle`。
+  - `工作流`：可查看不同写作场景，并通过下拉框切换当前全局输出模式。
+  - `个人词库`：读取真实个人词库，按全部 / 自动学习 / 手动添加筛选；新增词条会写入 `PersonalDictionary.json`。
+  - `权限`：展示麦克风、辅助功能、屏幕录制状态；已允许时隐藏打开按钮。
+- 设置窗口交互补齐：
+  - 普通按钮、分段 Tab、输出模式卡片、工作流输出模式下拉框都有 hover / pressed 反馈。
+  - 左侧导航补齐内边距和 hover，避免文字贴边。
+  - 快捷键录制状态使用中性亮框，不再使用蓝色描边。
+  - 快捷键录制时按 `ESC` 会取消录制，不会保存为快捷键。
+  - 输出模式选中框改为与快捷键输入框一致的中性亮框，三条指标保留品牌蓝进度条和选中动画。
+  - 词库筛选、弹窗按钮等点击命中改为按最小可交互区域优先处理，避免点 A 亮 B。
+  - 新增词库弹窗输入框占位文字垂直居中，`取消` 可关闭浮层。
+- 合并远端最新快捷键修复：
+  - 保留远端新增的全局 keyboard event tap fallback、输入监控权限入口和外设裸按键触发修复。
+  - 新设置窗口录制快捷键期间通过 `shortcutMonitor.setSuspended` 暂停全局监听，避免录制和全局触发互相抢事件。
+- 验证：
+  - `swift build`：通过。
+  - `git diff --check`：通过。
+  - `./scripts/build_app.sh release`：通过，已生成 `dist/NexVoice.app`。
+  - `codesign --verify --deep --strict --verbose=2 dist/NexVoice.app`：通过。
+  - `plutil -lint dist/NexVoice.app/Contents/Info.plist`：通过。
+- 重要边界：
+  - 当前仍是“全局输出模式”；如果以后要做“每个工作流单独指定默认输出模式”，需要新增设置存储和改写调用链，不应只做 UI。
 
 ## 已完成能力
 

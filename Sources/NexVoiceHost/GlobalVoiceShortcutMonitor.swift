@@ -23,6 +23,7 @@ final class GlobalVoiceShortcutMonitor {
     private var onLongPress: (() -> Void)?
     private var onLongPressEnded: (() -> Void)?
     private var onCancel: (() -> Void)?
+    private var isSuspended = false
 
     @discardableResult
     func start(
@@ -75,6 +76,17 @@ final class GlobalVoiceShortcutMonitor {
         isPressed = false
     }
 
+    func setSuspended(_ suspended: Bool) {
+        isSuspended = suspended
+        if suspended {
+            longPressWorkItem?.cancel()
+            longPressWorkItem = nil
+            isPressed = false
+            didTriggerLongPress = false
+            isCancelPressed = false
+        }
+    }
+
     func stop() {
         unregisterCarbonHotKey()
         keyboardEventTap.stop()
@@ -102,6 +114,7 @@ final class GlobalVoiceShortcutMonitor {
     }
 
     private func handle(_ event: NSEvent) {
+        guard !isSuspended else { return }
         switch event.type {
         case .keyDown:
             handleKeyDown(event)

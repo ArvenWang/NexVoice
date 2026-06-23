@@ -57,23 +57,37 @@ import Testing
     ))
 }
 
-@Test func dictionaryLearningPolicyAutoSavesSingleEnglishWordCorrection() {
-    #expect(VoiceDictionaryLearningPolicy.shouldAutoSaveLooseProperNounCorrection(
+@Test func dictionaryLearningPolicyAsksModelForSingleEnglishTermCorrection() {
+    #expect(VoiceDictionaryLearningPolicy.shouldAskModel(
         incorrectText: "timeless",
         correctedText: "typeless"
     ))
 }
 
-@Test func dictionaryLearningPolicyDoesNotAutoSaveOrdinaryEnglishPolish() {
-    #expect(!VoiceDictionaryLearningPolicy.shouldAutoSaveLooseProperNounCorrection(
+@Test func dictionaryLearningPolicyRejectsOrdinaryEnglishPolishBeforeModel() {
+    #expect(!VoiceDictionaryLearningPolicy.shouldAskModel(
         incorrectText: "good",
         correctedText: "great"
     ))
 }
 
-@Test func dictionaryLearningPolicyAutoSavesMixedCaseTermCorrection() {
-    #expect(VoiceDictionaryLearningPolicy.shouldAutoSaveLooseProperNounCorrection(
+@Test func dictionaryLearningPolicyAsksModelForMixedCaseTermCorrection() {
+    #expect(VoiceDictionaryLearningPolicy.shouldAskModel(
         incorrectText: "deep seek",
         correctedText: "DeepSeek"
+    ))
+}
+
+@Test func dictionaryLearningPolicyAllowsDistantASRCorrectionToTechnicalTerm() {
+    #expect(VoiceDictionaryLearningPolicy.shouldAskModel(
+        incorrectText: "是那只天猫",
+        correctedText: "HTML"
+    ))
+}
+
+@Test func dictionaryLearningPolicyRejectsInstructionSentenceAsDictionaryTerm() {
+    #expect(!VoiceDictionaryLearningPolicy.shouldAskModel(
+        incorrectText: "帮我到柜台上看一下",
+        correctedText: "查看一下 Git 上有没有最新代码"
     ))
 }

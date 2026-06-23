@@ -1,0 +1,1005 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NexVoice 设置窗口原型</title>
+  <style>
+    :root {
+      --window-w: 760px;
+      --window-h: 500px;
+      --titlebar-h: 34px;
+      --sidebar-w: 164px;
+      --page: #080808;
+      --window: #111112;
+      --titlebar: #26272b;
+      --sidebar: #151516;
+      --panel: #171718;
+      --panel-soft: #202022;
+      --field: #252527;
+      --line: rgba(255, 255, 255, 0.045);
+      --line-strong: rgba(255, 255, 255, 0.065);
+      --text: rgba(250, 250, 250, 0.93);
+      --muted: rgba(250, 250, 250, 0.58);
+      --faint: rgba(250, 250, 250, 0.38);
+      --green: #68d76e;
+      --blue: #58aeea;
+      --orange: #d4893b;
+      --space-1: 4px;
+      --space-2: 6px;
+      --space-3: 8px;
+      --space-4: 10px;
+      --space-5: 12px;
+      --space-6: 14px;
+      --space-7: 16px;
+      --space-8: 18px;
+      --radius-sm: 7px;
+      --radius-md: 9px;
+      --radius-lg: 11px;
+      --control-h: 30px;
+      --tab-h: 34px;
+      --primary-button-h: 32px;
+      --row-pad-x: 17px;
+      --row-pad-y: 15px;
+      --page-w: 496px;
+      --value-w: 168px;
+      --list-row-h: 70px;
+      --module-gap: var(--space-5);
+      --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", sans-serif;
+      --mono: "SF Mono", Menlo, Monaco, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: var(--page);
+      color: var(--text);
+      font-family: var(--font);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .settings-window {
+      width: var(--window-w);
+      height: var(--window-h);
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.13);
+      border-radius: 12px;
+      background: var(--window);
+      box-shadow: 0 28px 76px rgba(0, 0, 0, 0.58);
+    }
+
+    .titlebar {
+      height: var(--titlebar-h);
+      position: relative;
+      display: grid;
+      place-items: center;
+      background: var(--titlebar);
+      border-bottom: 1px solid rgba(0, 0, 0, 0.58);
+      color: rgba(255, 255, 255, 0.66);
+      font-size: 13px;
+      font-weight: 730;
+    }
+
+    .traffic {
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      display: flex;
+      gap: 8px;
+      transform: translateY(-50%);
+    }
+
+    .traffic span {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    .traffic span:nth-child(1) { background: #ff5f57; }
+    .traffic span:nth-child(2) { background: #ffbd2e; }
+    .traffic span:nth-child(3) { background: #28c840; }
+
+    .app {
+      height: calc(var(--window-h) - var(--titlebar-h));
+      display: grid;
+      grid-template-columns: var(--sidebar-w) 1fr;
+    }
+
+    .sidebar {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 20px;
+      padding: var(--space-7) var(--space-5);
+      background: var(--sidebar);
+      border-right: 1px solid rgba(255, 255, 255, 0.045);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      min-height: 24px;
+    }
+
+    .brand strong {
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1;
+      font-weight: 780;
+    }
+
+    .nav {
+      display: grid;
+      align-content: start;
+      gap: 18px;
+    }
+
+    .nav-group {
+      display: grid;
+      gap: 4px;
+    }
+
+    .nav-label {
+      padding: 0 8px 4px;
+      color: var(--faint);
+      font-size: 10px;
+      font-weight: 650;
+    }
+
+    .nav button {
+      height: 28px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 0 9px;
+      border: 0;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--muted);
+      font: 720 12px/28px var(--font);
+      text-align: left;
+      cursor: default;
+    }
+
+    .nav button.active {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.075);
+    }
+
+    .nav i {
+      width: 12px;
+      color: rgba(255, 255, 255, 0.38);
+      font-style: normal;
+      text-align: center;
+    }
+
+    .plan {
+      padding: 13px var(--space-6);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      background: rgba(255, 255, 255, 0.045);
+    }
+
+    .plan strong {
+      display: block;
+      font-size: 12px;
+      line-height: 1.2;
+    }
+
+    .plan p {
+      margin: 6px 0 9px;
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.35;
+    }
+
+    .plan a {
+      color: var(--blue);
+      font-size: 11px;
+      font-weight: 760;
+      text-decoration: none;
+    }
+
+    .content {
+      overflow: hidden;
+      padding: 26px 0 22px;
+    }
+
+    .page {
+      display: none;
+      width: var(--page-w);
+      margin: 0 auto;
+    }
+
+    .page.active {
+      display: block;
+    }
+
+    .page h1 {
+      margin: 0 0 16px;
+      color: var(--text);
+      font-size: 18px;
+      line-height: 1.2;
+      font-weight: 760;
+      letter-spacing: 0;
+    }
+
+    .card {
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-lg);
+      background: var(--panel);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+    }
+
+    .card + .card {
+      margin-top: var(--space-4);
+    }
+
+    .card-section {
+      padding: 11px var(--row-pad-x);
+    }
+
+    .card-row {
+      display: grid;
+      grid-template-columns: 1fr var(--value-w);
+      gap: var(--space-6);
+      align-items: center;
+      padding: var(--row-pad-y) var(--row-pad-x);
+      border-top: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.018);
+    }
+
+    .card-row:first-child {
+      border-top: 0;
+    }
+
+    .card h2 {
+      margin: 0;
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.25;
+      font-weight: 770;
+    }
+
+    .card p {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.45;
+      font-weight: 520;
+    }
+
+    .subtle {
+      color: var(--faint);
+    }
+
+    .field {
+      height: var(--control-h);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-sm);
+      background: var(--field);
+      color: rgba(255, 255, 255, 0.78);
+      font-size: 11px;
+      font-weight: 650;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+
+    .field.code {
+      font-family: var(--mono);
+      font-size: 10px;
+    }
+
+    .copy {
+      width: 24px;
+      height: 24px;
+      display: grid;
+      place-items: center;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.08);
+      color: rgba(255, 255, 255, 0.7);
+      font-size: 12px;
+    }
+
+    .inline-field {
+      display: block;
+    }
+
+    .button-row {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+    }
+
+    .btn {
+      height: 28px;
+      min-width: 62px;
+      padding: 0 12px;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-sm);
+      background: var(--field);
+      color: rgba(255, 255, 255, 0.82);
+      font: 720 11px/26px var(--font);
+    }
+
+    .btn.full {
+      width: 100%;
+    }
+
+    .btn.primary {
+      background: rgba(255, 255, 255, 0.88);
+      color: #171717;
+      height: var(--primary-button-h);
+      border: 0;
+      line-height: var(--primary-button-h);
+    }
+
+    .button-row .btn.primary {
+      height: 26px;
+      line-height: 26px;
+    }
+
+    .segmented {
+      height: var(--control-h);
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-sm);
+      background: rgba(255, 255, 255, 0.035);
+      padding: 3px;
+      gap: 3px;
+    }
+
+    .segmented span {
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 740;
+    }
+
+    .segmented .active {
+      color: var(--text);
+      border-radius: 5px;
+      background: rgba(255, 255, 255, 0.105);
+    }
+
+    .select::after {
+      content: "⌄";
+      color: var(--faint);
+      font-size: 12px;
+    }
+
+    .status {
+      color: var(--green);
+      font-size: 12px;
+      font-weight: 820;
+      justify-self: end;
+    }
+
+    .tag {
+      display: inline-grid;
+      place-items: center;
+      height: 20px;
+      padding: 0 7px;
+      border-radius: 5px;
+      background: rgba(212, 137, 59, 0.18);
+      color: #eda65f;
+      font-size: 10px;
+      font-weight: 780;
+    }
+
+    .empty {
+      height: 86px;
+      display: grid;
+      place-items: center;
+      border-top: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.018);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 650;
+    }
+
+    .page-scroll {
+      max-height: none;
+      overflow: visible;
+      padding-right: 0;
+    }
+
+    .page-scroll::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    .page-scroll::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .page-scroll::-webkit-scrollbar-thumb {
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.28);
+    }
+
+    .mode-cards {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-3);
+    }
+
+    .mode-card {
+      appearance: none;
+      min-height: 174px;
+      display: block;
+      padding: var(--space-6) var(--row-pad-x);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-lg);
+      background: var(--panel);
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      cursor: default;
+    }
+
+    .mode-card.active {
+      border-color: rgba(255, 255, 255, 0.18);
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .mode-card h2 {
+      margin: 0;
+      font-size: 13px;
+    }
+
+    .mode-card p {
+      margin: var(--space-3) 0 0;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.45;
+      display: -webkit-box;
+      overflow: hidden;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+    }
+
+    .mode-badge {
+      display: inline-grid;
+      place-items: center;
+      height: 20px;
+      margin-top: 11px;
+      padding: 0 8px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 760;
+    }
+
+    .mode-metrics {
+      display: grid;
+      gap: var(--space-2);
+      min-width: 0;
+      margin-top: var(--space-5);
+    }
+
+    .metric-row {
+      display: grid;
+      grid-template-columns: 38px 1fr 26px;
+      gap: var(--space-3);
+      align-items: center;
+    }
+
+    .metric-row span {
+      color: var(--faint);
+      font-size: 9px;
+      font-weight: 720;
+    }
+
+    .metric-row strong {
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 10px;
+      line-height: 1;
+      font-weight: 820;
+      text-align: right;
+    }
+
+    .metric-track {
+      height: 5px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .metric-track i {
+      display: block;
+      width: var(--value);
+      height: 100%;
+      border-radius: inherit;
+      background: rgba(255, 255, 255, 0.62);
+    }
+
+    .workflow-switcher {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 3px;
+      margin-bottom: var(--space-5);
+      height: var(--tab-h);
+      padding: 3px;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-sm);
+      background: rgba(255, 255, 255, 0.035);
+    }
+
+    .workflow-tab {
+      display: grid;
+      place-items: center;
+      min-width: 0;
+      height: 100%;
+      padding: 0 8px;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--muted);
+      font: 760 11px/1 var(--font);
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    .workflow-tab span {
+      display: none;
+    }
+
+    .workflow-tab.active {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.105);
+    }
+
+    .workflow-detail .card-row {
+      grid-template-columns: 1fr var(--value-w);
+    }
+
+    .value-text {
+      justify-self: end;
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 780;
+      text-align: right;
+    }
+
+    .value-text.muted {
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 680;
+    }
+
+    .workflow-rule {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .select-button {
+      justify-self: end;
+      min-width: 128px;
+      height: var(--control-h);
+      display: inline-flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-3);
+      padding: 0 var(--space-4);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-sm);
+      background: rgba(255, 255, 255, 0.045);
+      color: var(--text);
+      font: 760 11px/1 var(--font);
+    }
+
+    .select-button::after {
+      content: "⌄";
+      color: var(--faint);
+      font-size: 12px;
+    }
+
+    .dictionary-toolbar {
+      margin-bottom: 16px;
+    }
+
+    .dictionary-toolbar h1 {
+      margin: 0;
+      color: var(--text);
+      font-size: 18px;
+      line-height: 1.2;
+      font-weight: 760;
+      letter-spacing: 0;
+    }
+
+    .dictionary-controls {
+      display: grid;
+      grid-template-columns: 360px 90px;
+      justify-content: space-between;
+      gap: 0;
+      align-items: center;
+      margin-bottom: var(--space-5);
+    }
+
+    .dictionary-tabs {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(92px, 1fr));
+      gap: 3px;
+      height: var(--tab-h);
+      padding: 3px;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-sm);
+      background: rgba(255, 255, 255, 0.035);
+    }
+
+    .dictionary-tab {
+      display: grid;
+      place-items: center;
+      min-width: 0;
+      height: 100%;
+      padding: 0 var(--space-5);
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--muted);
+      font: 760 11px/1 var(--font);
+      white-space: nowrap;
+    }
+
+    .dictionary-tab.active {
+      background: rgba(255, 255, 255, 0.105);
+      color: var(--text);
+    }
+
+    .dictionary-controls .btn {
+      width: 90px;
+      height: var(--primary-button-h);
+      line-height: var(--primary-button-h);
+    }
+
+    .dictionary-list {
+      display: grid;
+      gap: var(--space-3);
+    }
+
+    .dictionary-entry {
+      display: grid;
+      grid-template-columns: 1fr 76px 126px;
+      gap: var(--space-5);
+      align-items: center;
+      min-height: 44px;
+      padding: var(--space-3) var(--row-pad-x);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      background: rgba(255, 255, 255, 0.026);
+    }
+
+    .dictionary-entry h2 {
+      margin: 0;
+      font-size: 12px;
+      line-height: 1.2;
+    }
+
+    .dictionary-entry p {
+      margin-top: 4px;
+      color: var(--faint);
+      font-size: 10px;
+    }
+
+    .dictionary-facts {
+      display: grid;
+      grid-template-columns: subgrid;
+      grid-column: 2 / 4;
+      gap: var(--space-5);
+    }
+
+    .dictionary-fact {
+      display: flex;
+      gap: 6px;
+      align-items: baseline;
+      min-width: 0;
+    }
+
+    .dictionary-fact span {
+      color: var(--faint);
+      font-size: 9px;
+      font-weight: 720;
+    }
+
+    .dictionary-fact strong {
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 760;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .permissions-card .card-row {
+      padding: 15px 17px;
+    }
+  </style>
+</head>
+<body>
+  <main class="settings-window" aria-label="NexVoice 设置窗口">
+    <div class="titlebar">
+      <div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div>
+      NexVoice 设置
+    </div>
+
+    <section class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <strong>NexVoice</strong>
+        </div>
+
+        <nav class="nav" aria-label="设置导航">
+          <div class="nav-group">
+            <button class="active" data-page="input"><i>⌘</i>输入</button>
+            <button data-page="modes"><i>✦</i>输出模式</button>
+            <button data-page="workflow"><i>◇</i>工作流</button>
+            <button data-page="dictionary"><i>▦</i>词库</button>
+            <button data-page="permissions"><i>●</i>权限</button>
+          </div>
+        </nav>
+
+        <div class="plan">
+          <strong>本地测试版本</strong>
+          <p>API 配置已嵌入，仅用于当前私用构建。</p>
+          <a href="#">0.1.7 (8)</a>
+        </div>
+      </aside>
+
+      <section class="content">
+        <div class="page active" id="input">
+          <h1>输入设置</h1>
+          <div class="page-scroll">
+            <section class="card">
+              <div class="card-row">
+                <div>
+                  <h2>快捷键</h2>
+                  <p>短按开始语音输入，长按进入看屏回复。</p>
+                </div>
+                <div class="inline-field">
+                  <div class="field code">Right Alt</div>
+                </div>
+              </div>
+              <div class="card-row">
+                <div>
+                  <h2>快捷键操作</h2>
+                  <p>重新录制快捷键，或恢复默认右 Alt。</p>
+                </div>
+                <div class="button-row">
+                  <button class="btn primary">录制</button>
+                  <button class="btn">恢复</button>
+                </div>
+              </div>
+              <div class="card-row">
+                <div>
+                  <h2>输出语言</h2>
+                  <p>用于语音输入、选中文本指令和看屏回复。</p>
+                </div>
+                <div class="segmented"><span class="active">中文</span><span>English</span></div>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <div class="page" id="modes">
+          <h1>输出模式</h1>
+          <div class="mode-cards">
+            <button class="mode-card active" type="button">
+              <h2>标准模式</h2>
+              <p>修正吞字、断词和重复，让表达自然清晰；严格贴合原意，不添加新观点。</p>
+              <div class="mode-metrics">
+                <div class="metric-row"><span>原意</span><div class="metric-track"><i style="--value: 95%"></i></div><strong>95</strong></div>
+                <div class="metric-row"><span>情绪</span><div class="metric-track"><i style="--value: 30%"></i></div><strong>30</strong></div>
+                <div class="metric-row"><span>发散</span><div class="metric-track"><i style="--value: 10%"></i></div><strong>10</strong></div>
+              </div>
+            </button>
+            <button class="mode-card" type="button">
+              <h2>社交达人</h2>
+              <p>适合聊天、评论和社媒；表达轻松有网感，英文更地道。</p>
+              <div class="mode-metrics">
+                <div class="metric-row"><span>原意</span><div class="metric-track"><i style="--value: 78%"></i></div><strong>78</strong></div>
+                <div class="metric-row"><span>情绪</span><div class="metric-track"><i style="--value: 58%"></i></div><strong>58</strong></div>
+                <div class="metric-row"><span>发散</span><div class="metric-track"><i style="--value: 42%"></i></div><strong>42</strong></div>
+              </div>
+            </button>
+            <button class="mode-card" type="button">
+              <h2>强化嘴替</h2>
+              <p>放大原本情绪和态度，表达更锋利、更有冲击力。</p>
+              <div class="mode-metrics">
+                <div class="metric-row"><span>原意</span><div class="metric-track"><i style="--value: 62%"></i></div><strong>62</strong></div>
+                <div class="metric-row"><span>情绪</span><div class="metric-track"><i style="--value: 96%"></i></div><strong>96</strong></div>
+                <div class="metric-row"><span>发散</span><div class="metric-track"><i style="--value: 76%"></i></div><strong>76</strong></div>
+              </div>
+            </button>
+            <button class="mode-card" type="button">
+              <h2>冷静模式</h2>
+              <p>压低攻击性和混乱表达，用更少的字保留核心诉求。</p>
+              <div class="mode-metrics">
+                <div class="metric-row"><span>原意</span><div class="metric-track"><i style="--value: 88%"></i></div><strong>88</strong></div>
+                <div class="metric-row"><span>情绪</span><div class="metric-track"><i style="--value: 18%"></i></div><strong>18</strong></div>
+                <div class="metric-row"><span>发散</span><div class="metric-track"><i style="--value: 14%"></i></div><strong>14</strong></div>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <div class="page" id="workflow">
+          <h1>工作流</h1>
+          <div class="workflow-switcher" aria-label="工作流切换">
+            <button class="workflow-tab active" type="button">
+              开发协作
+            </button>
+            <button class="workflow-tab" type="button">
+              邮件回复
+            </button>
+            <button class="workflow-tab" type="button">
+              社交发布
+            </button>
+            <button class="workflow-tab" type="button">
+              即时沟通
+            </button>
+            <button class="workflow-tab" type="button">
+              通用输入
+            </button>
+          </div>
+
+          <section class="card workflow-detail">
+            <div class="card-row">
+              <div>
+                <h2>当前应用</h2>
+                <p>打开设置时读取前台应用和焦点输入框。</p>
+              </div>
+              <div class="value-text">Codex</div>
+            </div>
+            <div class="card-row">
+              <div>
+                <h2>识别场景</h2>
+                <p>根据当前应用判断你更像在写哪类内容。</p>
+              </div>
+              <div class="value-text">开发协作</div>
+            </div>
+            <div class="card-row">
+              <div>
+                <h2>输出模式</h2>
+                <p>可为当前工作流指定默认改写风格。</p>
+              </div>
+              <button class="select-button" type="button">标准模式</button>
+            </div>
+            <div class="card-row">
+              <div>
+                <h2>工作流规则</h2>
+                <p class="workflow-rule">保留用户的任务、约束、判断和问题边界；不要把需求改成泛泛建议。</p>
+              </div>
+              <span class="status">已识别</span>
+            </div>
+          </section>
+        </div>
+
+        <div class="page" id="dictionary">
+          <div class="dictionary-toolbar">
+            <h1>个人词库</h1>
+          </div>
+          <section class="dictionary-panel">
+            <div class="dictionary-controls">
+              <div class="dictionary-tabs" aria-label="词库来源">
+                <button class="dictionary-tab active" type="button" data-dictionary-filter="all">全部</button>
+                <button class="dictionary-tab" type="button" data-dictionary-filter="auto">自动学习</button>
+                <button class="dictionary-tab" type="button" data-dictionary-filter="manual">手动添加</button>
+              </div>
+              <button class="btn primary">添加词条</button>
+            </div>
+            <div class="dictionary-list">
+              <div class="dictionary-entry" data-source="auto">
+                <div>
+                  <h2>Typeless</h2>
+                </div>
+                <div class="dictionary-facts">
+                  <div class="dictionary-fact"><span>权重</span><strong>8</strong></div>
+                  <div class="dictionary-fact"><span>场景</span><strong>Codex</strong></div>
+                </div>
+              </div>
+              <div class="dictionary-entry" data-source="auto">
+                <div>
+                  <h2>HTML</h2>
+                </div>
+                <div class="dictionary-facts">
+                  <div class="dictionary-fact"><span>权重</span><strong>8</strong></div>
+                  <div class="dictionary-fact"><span>场景</span><strong>开发协作</strong></div>
+                </div>
+              </div>
+              <div class="dictionary-entry" data-source="manual">
+                <div>
+                  <h2>NexHub</h2>
+                </div>
+                <div class="dictionary-facts">
+                  <div class="dictionary-fact"><span>权重</span><strong>10</strong></div>
+                  <div class="dictionary-fact"><span>场景</span><strong>全局</strong></div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="page" id="permissions">
+          <h1>权限</h1>
+          <section class="card permissions-card">
+            <div class="card-row">
+              <div>
+                <h2>麦克风</h2>
+                <p>用于录音和语音指令识别。</p>
+              </div>
+              <span class="status">已允许</span>
+            </div>
+            <div class="card-row">
+              <div>
+                <h2>辅助功能</h2>
+                <p>把最终文本写入当前输入框。</p>
+              </div>
+              <span class="status">已允许</span>
+            </div>
+            <div class="card-row">
+              <div>
+                <h2>屏幕录制</h2>
+                <p>看屏回复只读取当前屏幕可见内容。</p>
+              </div>
+              <span class="status">已允许</span>
+            </div>
+          </section>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const navButtons = [...document.querySelectorAll(".nav button[data-page]")];
+    const pages = [...document.querySelectorAll(".page")];
+    const workflowItems = [...document.querySelectorAll(".workflow-tab")];
+    const modeCards = [...document.querySelectorAll(".mode-card")];
+    const dictionaryTabs = [...document.querySelectorAll(".dictionary-tab")];
+    const dictionaryEntries = [...document.querySelectorAll(".dictionary-entry")];
+
+    navButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const page = button.dataset.page;
+        navButtons.forEach((item) => item.classList.toggle("active", item === button));
+        pages.forEach((item) => item.classList.toggle("active", item.id === page));
+      });
+    });
+
+    workflowItems.forEach((item) => {
+      item.addEventListener("click", () => {
+        workflowItems.forEach((entry) => entry.classList.toggle("active", entry === item));
+      });
+    });
+
+    modeCards.forEach((item) => {
+      item.addEventListener("click", () => {
+        modeCards.forEach((entry) => entry.classList.toggle("active", entry === item));
+      });
+    });
+
+    dictionaryTabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const filter = tab.dataset.dictionaryFilter;
+        dictionaryTabs.forEach((entry) => entry.classList.toggle("active", entry === tab));
+        dictionaryEntries.forEach((entry) => {
+          entry.hidden = filter !== "all" && entry.dataset.source !== filter;
+        });
+      });
+    });
+  </script>
+</body>
+</html>

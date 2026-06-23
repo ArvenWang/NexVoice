@@ -4,6 +4,12 @@ import NexVoiceCore
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private struct FailedTranscriptionRetry {
+        let originalText: String
+        let rewriteContext: VoiceRewriteContext
+        let targetApplication: NSRunningApplication?
+    }
+
     private var statusItem: NSStatusItem?
     private var shortcutMenuItem: NSMenuItem?
     private var shortcutSettingsMenuItem: NSMenuItem?
@@ -34,8 +40,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     )
     private let shortcutStore = VoiceShortcutStore()
     private let shortcutMonitor = GlobalVoiceShortcutMonitor()
-    private var shortcutSettingsWindowController: VoiceShortcutSettingsWindowController?
-    private var personalDictionaryWindowController: VoicePersonalDictionaryWindowController?
+    private var settingsWindowController: VoiceSettingsWindowController?
+    private var settingsPreviewApplication: NSRunningApplication?
     private var selectedOutputLanguage = VoiceOutputLanguage.simplifiedChinese
     private var selectedRewriteStyle = VoiceRewriteStyle.default
     private var voiceShortcut: VoiceShortcut = .default
@@ -47,6 +53,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var didInsertCurrentSession = false
     private var isCurrentSessionCancelled = false
     private var insertedTextPreview: String?
+    private var latestRecoverableASRText: String?
+    private var pendingFailedTranscriptionRetry: FailedTranscriptionRetry?
     private var isRewritingCurrentSession = false
     private var isScreenReplyInstructionSession = false
     private var didDetectScreenReplyVoiceInstruction = false
@@ -69,6 +77,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NSApp.setActivationPolicy(.accessory)
         voiceShortcut = shortcutStore.load()
+        selectedOutputLanguage = Self.loadOutputLanguage()
+        selectedRewriteStyle = Self.loadRewriteStyle()
         configureStatusItem()
         captionPanel.reset()
         startShortcutMonitor()
@@ -85,7 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
         let shortcutItem = NSMenuItem(title: "快捷键：\(voiceShortcut.displayTitle)", action: nil, keyEquivalent: "")
-        let settingsItem = NSMenuItem(title: "设置快捷键...", action: #selector(openShortcutSettings), keyEquivalent: "")
+        let settingsItem = NSMenuItem(title: "设置...", action: #selector(openSettingsMenu), keyEquivalent: "")
         let chineseOutputItem = NSMenuItem(title: "输出：中文", action: #selector(selectChineseOutput), keyEquivalent: "")
         let englishOutputItem = NSMenuItem(title: "输出：English", action: #selector(selectEnglishOutput), keyEquivalent: "")
         let outputStyleItem = NSMenuItem(title: "输出模式：\(selectedRewriteStyle.menuTitle)", action: nil, keyEquivalent: "")
@@ -193,6 +203,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func selectChineseOutput() {
         guard transcriptionService.state == .idle else { return }
         selectedOutputLanguage = .simplifiedChinese
+        Self.saveOutputLanguage(selectedOutputLanguage)
         captionPanel.reset()
         refreshMenuState()
     }
@@ -200,6 +211,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func selectEnglishOutput() {
         guard transcriptionService.state == .idle else { return }
         selectedOutputLanguage = .english
+        Self.saveOutputLanguage(selectedOutputLanguage)
         captionPanel.reset()
         refreshMenuState()
     }
@@ -211,13 +223,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         selectedRewriteStyle = style
+        Self.saveRewriteStyle(style)
         captionPanel.reset()
         refreshMenuState()
     }
 
-    @objc private func openShortcutSettings() {
-        let controller = VoiceShortcutSettingsWindowController(
+    @objc private func openSettingsMenu() {
+        openSettings(tab: .input)
+    }
+
+    private func openSettings(tab: VoiceSettingsWindowController.Tab) {
+        if let frontmostApplication = NSWorkspace.shared.frontmostApplication,
+           frontmostApplication.bundleIdentifier != Bundle.main.bundleIdentifier {
+            settingsPreviewApplication = frontmostApplication
+        }
+
+        let controller = settingsWindowController ?? VoiceSettingsWindowController(
+            selectedTab: tab,
             shortcut: voiceShortcut,
+            outputLanguage: selectedOutputLanguage,
+            rewriteStyle: selectedRewriteStyle,
+            workflowContextProvider: { [weak self] in
+                guard let self else { return VoiceRewriteContext() }
+                return self.textInserter.rewriteContext(
+                    in: self.settingsPreviewTargetApplication(),
+                    selectedTextMode: false,
+                    personalDictionary: VoicePersonalDictionaryStore.load()
+                )
+            },
+            canChangeInputSettings: { true },
             onShortcutChanged: { [weak self] shortcut in
                 guard let self else { return }
                 self.voiceShortcut = shortcut
@@ -226,24 +260,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.captionPanel.reset()
                 self.refreshMenuState()
             },
-            onRecordingStateChanged: { [weak self] isRecording in
+            onOutputLanguageChanged: { [weak self] language in
                 guard let self else { return }
-                if isRecording {
-                    self.shortcutMonitor.stop()
-                } else {
-                    self.startShortcutMonitor()
-                }
+                self.selectedOutputLanguage = language
+                Self.saveOutputLanguage(language)
+                self.captionPanel.reset()
                 self.refreshMenuState()
+            },
+            onRewriteStyleChanged: { [weak self] style in
+                guard let self else { return }
+                self.selectedRewriteStyle = style
+                Self.saveRewriteStyle(style)
+                self.captionPanel.reset()
+                self.refreshMenuState()
+            },
+            onShortcutRecordingStateChanged: { [weak self] isRecording in
+                guard let self else { return }
+                self.shortcutMonitor.setSuspended(isRecording)
+                self.refreshMenuState()
+            },
+            onRequestMicrophonePermission: { [weak self] in
+                self?.requestMicrophonePermission()
+            },
+            onRequestAccessibilityPermission: { [weak self] in
+                self?.openAccessibilitySettings()
+            },
+            onRequestScreenRecordingPermission: { [weak self] in
+                self?.openScreenRecordingSettings()
             }
         )
-        shortcutSettingsWindowController = controller
+        settingsWindowController = controller
+        controller.update(
+            shortcut: voiceShortcut,
+            outputLanguage: selectedOutputLanguage,
+            rewriteStyle: selectedRewriteStyle
+        )
+        controller.select(tab: tab)
         controller.showWindow(nil)
     }
 
+    private func settingsPreviewTargetApplication() -> NSRunningApplication? {
+        if let targetApplicationForCurrentSession {
+            return targetApplicationForCurrentSession
+        }
+        if let settingsPreviewApplication {
+            return settingsPreviewApplication
+        }
+        let frontmostApplication = NSWorkspace.shared.frontmostApplication
+        guard frontmostApplication?.bundleIdentifier != Bundle.main.bundleIdentifier else {
+            return nil
+        }
+        return frontmostApplication
+    }
+
     @objc private func openPersonalDictionary() {
-        let controller = personalDictionaryWindowController ?? VoicePersonalDictionaryWindowController()
-        personalDictionaryWindowController = controller
-        controller.showWindow(nil)
+        openSettings(tab: .dictionary)
     }
 
     @objc private func runRewriteEvaluation() {
@@ -342,6 +413,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         didInsertCurrentSession = false
         isCurrentSessionCancelled = false
         insertedTextPreview = nil
+        latestRecoverableASRText = nil
+        pendingFailedTranscriptionRetry = nil
         isRewritingCurrentSession = true
         isScreenReplyInstructionSession = true
         didDetectScreenReplyVoiceInstruction = false
@@ -434,6 +507,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         didInsertCurrentSession = false
         isCurrentSessionCancelled = false
         insertedTextPreview = nil
+        latestRecoverableASRText = nil
+        pendingFailedTranscriptionRetry = nil
         isRewritingCurrentSession = false
         isScreenReplyInstructionSession = false
         didDetectScreenReplyVoiceInstruction = false
@@ -490,6 +565,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if case .failed(let message) = event {
             handleTranscriptionFailure(message)
             return
+        }
+
+        switch event {
+        case .partialTranscript(let text, _), .finalTranscript(let text):
+            latestRecoverableASRText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        default:
+            break
         }
 
         if case .finalTranscript(let instruction) = event, isScreenReplyInstructionSession {
@@ -652,6 +734,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showContextualResult(_ text: String, anchorRect: CGRect?) {
         selectedTextContextForCurrentSession = nil
         rewriteContextForCurrentSession = nil
+        latestRecoverableASRText = nil
+        pendingFailedTranscriptionRetry = nil
         insertedTextPreview = nil
         isRewritingCurrentSession = false
         rewriteTask = nil
@@ -671,6 +755,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         isRewritingCurrentSession = false
         rewriteTask = nil
         rewriteContextForCurrentSession = nil
+        latestRecoverableASRText = nil
+        pendingFailedTranscriptionRetry = nil
 
         do {
             try textInserter.insert(text, into: targetApplication)
@@ -819,6 +905,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         isCurrentSessionCancelled = true
         didInsertCurrentSession = true
         insertedTextPreview = nil
+        latestRecoverableASRText = nil
+        pendingFailedTranscriptionRetry = nil
         selectedTextContextForCurrentSession = nil
         rewriteContextForCurrentSession = nil
         screenReplyCapturedContextForCurrentSession = nil
@@ -858,13 +946,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        let wasScreenReplyInstructionSession = isScreenReplyInstructionSession
         isRewritingCurrentSession = false
         finishScreenReplyInstructionSession()
         rewriteTask?.cancel()
         rewriteTask = nil
-        captionPanel.showStatus("转写失败", isError: true, autoHideDelay: 1.4)
+        if !wasScreenReplyInstructionSession,
+           let retry = failedTranscriptionRetrySnapshot() {
+            pendingFailedTranscriptionRetry = retry
+            captionPanel.showRetryStatus("转写失败", actionTitle: "重试", autoHideDelay: 10) { [weak self] in
+                Task { @MainActor [weak self] in
+                    self?.retryFailedTranscription()
+                }
+            }
+        } else {
+            captionPanel.showStatus("转写失败", isError: true, autoHideDelay: 1.8)
+        }
         statusItem?.button?.title = "NexVoice 出错"
         refreshMenuState()
+    }
+
+    private func failedTranscriptionRetrySnapshot() -> FailedTranscriptionRetry? {
+        guard let text = latestRecoverableASRText?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !text.isEmpty else {
+            return nil
+        }
+        let rewriteContext = rewriteContextForCurrentSession ?? VoiceRewriteContext(
+            sourceApplicationName: targetApplicationForCurrentSession?.localizedName,
+            sourceApplicationBundleIdentifier: targetApplicationForCurrentSession?.bundleIdentifier,
+            selectedTextMode: selectedTextContextForCurrentSession?.text.isEmpty == false,
+            personalDictionary: VoicePersonalDictionaryStore.load()
+        )
+        return FailedTranscriptionRetry(
+            originalText: text,
+            rewriteContext: rewriteContext,
+            targetApplication: targetApplicationForCurrentSession
+        )
+    }
+
+    private func retryFailedTranscription() {
+        guard let retry = pendingFailedTranscriptionRetry else { return }
+        pendingFailedTranscriptionRetry = nil
+        latestRecoverableASRText = retry.originalText
+        rewriteContextForCurrentSession = retry.rewriteContext
+        targetApplicationForCurrentSession = retry.targetApplication
+        didInsertCurrentSession = false
+        isCurrentSessionCancelled = false
+        isRewritingCurrentSession = false
+        rewriteTask?.cancel()
+        rewriteTask = nil
+        captionPanel.showLoading(
+            selectedTextContextForCurrentSession?.text.isEmpty == false ? "AI 处理中" : "AI 整理中",
+            anchorRect: selectedTextContextForCurrentSession?.anchorRect
+        )
+        statusItem?.button?.title = "NexVoice 整理中"
+        refreshMenuState()
+        insertFinalTextIfNeeded(from: .finalTranscript(retry.originalText))
     }
 
     private var shortcutSessionState: VoiceShortcutSessionState {
@@ -990,6 +1127,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             return "ASR：腾讯云实时 ASR（配置读取失败）"
         }
+    }
+
+    private static func loadOutputLanguage() -> VoiceOutputLanguage {
+        let rawValue = UserDefaults.standard.string(forKey: "selectedOutputLanguage") ?? ""
+        return VoiceOutputLanguage(rawValue: rawValue) ?? .simplifiedChinese
+    }
+
+    private static func saveOutputLanguage(_ language: VoiceOutputLanguage) {
+        UserDefaults.standard.set(language.rawValue, forKey: "selectedOutputLanguage")
+    }
+
+    private static func loadRewriteStyle() -> VoiceRewriteStyle {
+        let rawValue = UserDefaults.standard.string(forKey: "selectedRewriteStyle") ?? ""
+        return VoiceRewriteStyle(rawValue: rawValue) ?? .default
+    }
+
+    private static func saveRewriteStyle(_ style: VoiceRewriteStyle) {
+        UserDefaults.standard.set(style.rawValue, forKey: "selectedRewriteStyle")
     }
 
     private func showNotification(title: String, body: String) {

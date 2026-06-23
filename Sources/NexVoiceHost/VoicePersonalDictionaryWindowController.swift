@@ -3,10 +3,15 @@ import NexVoiceCore
 
 @MainActor
 final class VoicePersonalDictionaryWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
+    private enum Row {
+        case term(VoicePersonalDictionaryTerm)
+        case correction(VoicePersonalDictionaryCorrection)
+    }
+
     private let tableView = NSTableView()
     private let summaryLabel = NSTextField(labelWithString: "")
     private let deleteButton = NSButton(title: "删除所选", target: nil, action: nil)
-    private var terms: [VoicePersonalDictionaryTerm] = []
+    private var rows: [Row] = []
 
     init() {
         let window = NSWindow(
@@ -35,12 +40,12 @@ final class VoicePersonalDictionaryWindowController: NSWindowController, NSTable
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int {
-        terms.count
+        rows.count
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        guard row < terms.count, let identifier = tableColumn?.identifier else { return nil }
-        let textField = NSTextField(labelWithString: value(for: identifier.rawValue, term: terms[row]))
+        guard row < rows.count, let identifier = tableColumn?.identifier else { return nil }
+        let textField = NSTextField(labelWithString: value(for: identifier.rawValue, row: rows[row]))
         textField.lineBreakMode = .byTruncatingTail
         textField.maximumNumberOfLines = 2
         textField.font = .systemFont(ofSize: 12)
@@ -103,11 +108,11 @@ final class VoicePersonalDictionaryWindowController: NSWindowController, NSTable
         tableView.headerView = NSTableHeaderView()
         tableView.allowsMultipleSelection = true
 
-        addColumn(id: "phrase", title: "词条", width: 140)
-        addColumn(id: "aliases", title: "别名", width: 160)
-        addColumn(id: "weight", title: "基础权重", width: 70)
+        addColumn(id: "type", title: "类型", width: 70)
+        addColumn(id: "phrase", title: "内容", width: 210)
+        addColumn(id: "weight", title: "权重 / 目标", width: 100)
         addColumn(id: "contexts", title: "场景权重", width: 180)
-        addColumn(id: "note", title: "说明 / 状态", width: 190)
+        addColumn(id: "note", title: "说明 / 状态", width: 220)
     }
 
     private func addColumn(id: String, title: String, width: CGFloat) {
@@ -124,17 +129,28 @@ final class VoicePersonalDictionaryWindowController: NSWindowController, NSTable
 
     @objc private func deleteSelectedTerms() {
         let selectedRows = tableView.selectedRowIndexes
-        let selectedTerms = selectedRows.compactMap { row in
-            row >= 0 && row < terms.count ? terms[row] : nil
+        let selectedTerms = selectedRows.compactMap { row -> VoicePersonalDictionaryTerm? in
+            guard row >= 0 && row < rows.count else { return nil }
+            if case .term(let term) = rows[row] { return term }
+            return nil
         }
-        guard !selectedTerms.isEmpty else { return }
+        let selectedCorrections = selectedRows.compactMap { row -> VoicePersonalDictionaryCorrection? in
+            guard row >= 0 && row < rows.count else { return nil }
+            if case .correction(let correction) = rows[row] { return correction }
+            return nil
+        }
+        guard !selectedTerms.isEmpty || !selectedCorrections.isEmpty else { return }
 
         let alert = NSAlert()
-        alert.messageText = selectedTerms.count == 1 ? "删除这个词条？" : "删除 \(selectedTerms.count) 个词条？"
-        alert.informativeText = selectedTerms
+        let selectedCount = selectedTerms.count + selectedCorrections.count
+        alert.messageText = selectedCount == 1 ? "删除这一项？" : "删除 \(selectedCount) 项？"
+        let previewItems = selectedTerms
             .prefix(6)
             .map(\.phrase)
-            .joined(separator: "、")
+            + selectedCorrections
+                .prefix(max(0, 6 - selectedTerms.count))
+                .map { "\($0.observedText) -> \($0.targetTerm)" }
+        alert.informativeText = previewItems.joined(separator: "、")
         alert.alertStyle = .warning
         alert.addButton(withTitle: "删除")
         alert.addButton(withTitle: "取消")
@@ -144,6 +160,12 @@ final class VoicePersonalDictionaryWindowController: NSWindowController, NSTable
         do {
             for term in selectedTerms {
                 try VoicePersonalDictionaryStore.delete(phrase: term.phrase)
+            }
+            for correction in selectedCorrections {
+                try VoicePersonalDictionaryStore.deleteCorrection(
+                    observedText: correction.observedText,
+                    targetTerm: correction.targetTerm
+                )
             }
             reloadDictionary()
         } catch {
@@ -156,28 +178,62 @@ final class VoicePersonalDictionaryWindowController: NSWindowController, NSTable
     }
 
     private func reloadDictionary() {
-        terms = VoicePersonalDictionaryStore.load().terms.sorted {
+        let dictionary = VoicePersonalDictionaryStore.load()
+        let terms = dictionary.terms.sorted {
             if $0.weight == $1.weight {
                 return $0.phrase.localizedCaseInsensitiveCompare($1.phrase) == .orderedAscending
             }
             return $0.weight > $1.weight
         }
-        summaryLabel.stringValue = terms.isEmpty ? "暂无词条" : "\(terms.count) 个词条"
+        let corrections = dictionary.corrections.sorted {
+            if $0.targetTerm == $1.targetTerm {
+                return $0.observedText.localizedCaseInsensitiveCompare($1.observedText) == .orderedAscending
+            }
+            return $0.targetTerm.localizedCaseInsensitiveCompare($1.targetTerm) == .orderedAscending
+        }
+        rows = terms.map(Row.term) + corrections.map(Row.correction)
+        if rows.isEmpty {
+            summaryLabel.stringValue = "暂无词条"
+        } else {
+            summaryLabel.stringValue = "\(terms.count) 个热词，\(corrections.count) 条纠错"
+        }
         tableView.reloadData()
         deleteButton.isEnabled = tableView.numberOfSelectedRows > 0
     }
 
-    private func value(for columnID: String, term: VoicePersonalDictionaryTerm) -> String {
+    private func value(for columnID: String, row: Row) -> String {
         switch columnID {
+        case "type":
+            switch row {
+            case .term:
+                return "热词"
+            case .correction:
+                return "纠错"
+            }
         case "phrase":
-            return term.phrase
-        case "aliases":
-            return term.aliases.isEmpty ? "-" : term.aliases.joined(separator: "、")
+            switch row {
+            case .term(let term):
+                return term.phrase
+            case .correction(let correction):
+                return correction.observedText
+            }
         case "weight":
-            return "\(term.weight)"
+            switch row {
+            case .term(let term):
+                return "\(term.weight)"
+            case .correction(let correction):
+                return correction.targetTerm
+            }
         case "contexts":
-            guard !term.contextWeights.isEmpty else { return "-" }
-            return term.contextWeights
+            let contextWeights: [String: Int]
+            switch row {
+            case .term(let term):
+                contextWeights = term.contextWeights
+            case .correction(let correction):
+                contextWeights = correction.contextWeights
+            }
+            guard !contextWeights.isEmpty else { return "-" }
+            return contextWeights
                 .sorted { lhs, rhs in
                     if lhs.value == rhs.value { return lhs.key < rhs.key }
                     return lhs.value > rhs.value
@@ -186,8 +242,13 @@ final class VoicePersonalDictionaryWindowController: NSWindowController, NSTable
                 .map { "\($0.key.replacingOccurrences(of: "bundle:", with: "")) ×\($0.value)" }
                 .joined(separator: "，")
         case "note":
-            let note = term.note?.isEmpty == false ? term.note! : "已启用"
-            return "\(note)"
+            switch row {
+            case .term(let term):
+                return term.note?.isEmpty == false ? term.note! : "已启用"
+            case .correction(let correction):
+                let note = correction.note?.isEmpty == false ? correction.note! : "已启用"
+                return "\(String(format: "%.0f%%", correction.confidence * 100)) · \(note)"
+            }
         default:
             return ""
         }

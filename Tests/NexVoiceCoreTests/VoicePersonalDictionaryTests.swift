@@ -64,7 +64,7 @@ import Testing
     #expect(dictionary.terms.first?.note == "产品名")
 }
 
-@Test func personalDictionaryStoreSavesAndMergesAliases() throws {
+@Test func personalDictionaryStoreIgnoresAliasesAndMergesContextOnly() throws {
     let temporaryFile = FileManager.default.temporaryDirectory
         .appendingPathComponent(UUID().uuidString)
         .appendingPathExtension("json")
@@ -82,8 +82,9 @@ import Testing
     #expect(dictionary.terms.count == 1)
     #expect(dictionary.terms[0].phrase == "NexVoice")
     #expect(dictionary.terms[0].weight == 10)
-    #expect(dictionary.terms[0].aliases.contains("nex voice"))
-    #expect(dictionary.terms[0].aliases.contains("next voice"))
+    #expect(dictionary.terms[0].aliases.isEmpty)
+    let savedJSON = try String(contentsOf: temporaryFile, encoding: .utf8)
+    #expect(!savedJSON.contains("aliases"))
 }
 
 @Test func personalDictionaryStoreMergesContextWeights() throws {
@@ -128,6 +129,53 @@ import Testing
     #expect(VoicePersonalDictionaryStore.load(fileURL: temporaryFile).terms.map(\.phrase) == ["NexVoice"])
 }
 
+@Test func personalDictionaryStoresCorrectionsBesideTerms() throws {
+    let temporaryFile = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString)
+        .appendingPathExtension("json")
+    defer { try? FileManager.default.removeItem(at: temporaryFile) }
+
+    try VoicePersonalDictionaryStore.upsert(
+        VoicePersonalDictionaryTerm(phrase: "HTML", contextWeights: ["bundle:com.openai.codex": 1]),
+        fileURL: temporaryFile
+    )
+    let dictionary = try VoicePersonalDictionaryStore.upsertCorrection(
+        VoicePersonalDictionaryCorrection(
+            observedText: "是那只天猫",
+            targetTerm: "HTML",
+            confidence: 0.7,
+            contextWeights: ["bundle:com.openai.codex": 1]
+        ),
+        fileURL: temporaryFile
+    )
+
+    #expect(dictionary.terms.map(\.phrase) == ["HTML"])
+    #expect(dictionary.corrections.count == 1)
+    #expect(dictionary.corrections.first?.observedText == "是那只天猫")
+    #expect(dictionary.corrections.first?.targetTerm == "HTML")
+}
+
+@Test func personalDictionaryDeleteTermAlsoDeletesCorrectionsForThatTerm() throws {
+    let temporaryFile = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString)
+        .appendingPathExtension("json")
+    defer { try? FileManager.default.removeItem(at: temporaryFile) }
+
+    try VoicePersonalDictionaryStore.upsert(
+        VoicePersonalDictionaryTerm(phrase: "HTML"),
+        fileURL: temporaryFile
+    )
+    try VoicePersonalDictionaryStore.upsertCorrection(
+        VoicePersonalDictionaryCorrection(observedText: "是那只天猫", targetTerm: "HTML"),
+        fileURL: temporaryFile
+    )
+
+    let dictionary = try VoicePersonalDictionaryStore.delete(phrase: "html", fileURL: temporaryFile)
+
+    #expect(dictionary.terms.isEmpty)
+    #expect(dictionary.corrections.isEmpty)
+}
+
 @Test func personalDictionaryStoreReturnsEmptyDictionaryWhenFileIsMissing() {
     let missingFile = FileManager.default.temporaryDirectory
         .appendingPathComponent(UUID().uuidString)
@@ -139,18 +187,45 @@ import Testing
     #expect(dictionary.hotwordList == nil)
 }
 
-@Test func personalDictionaryTextProtectorUsesAliasesAndCaseFixes() {
+@Test func personalDictionaryStoreFiltersSentenceLikeTerms() {
+    let dictionary = VoicePersonalDictionary(terms: [
+        VoicePersonalDictionaryTerm(phrase: "查看一下 Git 上有没有最新代码"),
+        VoicePersonalDictionaryTerm(phrase: "HTML"),
+        VoicePersonalDictionaryTerm(phrase: "typeless")
+    ])
+
+    #expect(dictionary.terms.map(\.phrase) == ["HTML", "typeless"])
+}
+
+@Test func personalDictionaryTextProtectorUsesOnlyPhraseCaseFixes() {
     let dictionary = VoicePersonalDictionary(terms: [
         VoicePersonalDictionaryTerm(phrase: "NexVoice", aliases: ["nex voice", "next voice"]),
         VoicePersonalDictionaryTerm(phrase: "DeepSeek")
     ])
 
     let output = VoicePersonalDictionaryTextProtector.protect(
-        "我觉得 nex voice 和 deepseek 的体验都很重要，next voice 不能写错。",
+        "我觉得 nexvoice 和 deepseek 的体验都很重要，next voice 不会作为别名纠正。",
         dictionary: dictionary
     )
 
     #expect(output.contains("NexVoice"))
     #expect(output.contains("DeepSeek"))
-    #expect(!output.contains("next voice"))
+    #expect(output.contains("next voice"))
+}
+
+@Test func personalDictionaryTextProtectorAppliesLearnedCorrections() {
+    let dictionary = VoicePersonalDictionary(
+        terms: [VoicePersonalDictionaryTerm(phrase: "HTML")],
+        corrections: [
+            VoicePersonalDictionaryCorrection(observedText: "是那只天猫", targetTerm: "HTML")
+        ]
+    )
+
+    let output = VoicePersonalDictionaryTextProtector.protect(
+        "这里的 是那只天猫 应该按技术词处理。",
+        dictionary: dictionary
+    )
+
+    #expect(output.contains("HTML"))
+    #expect(!output.contains("是那只天猫"))
 }
