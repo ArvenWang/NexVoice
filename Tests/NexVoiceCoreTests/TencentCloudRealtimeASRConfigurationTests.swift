@@ -51,7 +51,7 @@ import Testing
         hotwordList: "NexVoice|11"
     )
 
-    #expect(configuration.signaturePlaintext == "asr.cloud.tencent.com/asr/v2/1250000000?convert_num_mode=1&engine_model_type=16k_zh_en&expired=1745933288&filter_dirty=0&filter_empty_result=1&filter_modal=0&filter_punc=0&hotword_list=NexVoice|11&max_speak_time=10000&needvad=1&nonce=8743357&secretid=AKIDexample&timestamp=1745932688&vad_silence_time=800&voice_format=1&voice_id=voice-1&word_info=0")
+    #expect(configuration.signaturePlaintext == "asr.cloud.tencent.com/asr/v2/1250000000?convert_num_mode=1&engine_model_type=16k_zh_en&expired=1745933288&filter_dirty=0&filter_empty_result=1&filter_modal=0&filter_punc=0&hotword_list=NexVoice|11&max_speak_time=90000&needvad=1&nonce=8743357&secretid=AKIDexample&timestamp=1745932688&vad_silence_time=800&voice_format=1&voice_id=voice-1&word_info=0")
     #expect(TencentCloudRealtimeASRSigner.hmacSHA1Base64(message: "message", key: "secret") == "DK9kn+7klT2Hv5A6wRdsReAo3xY=")
 
     let url = try configuration.signedWebSocketURL()

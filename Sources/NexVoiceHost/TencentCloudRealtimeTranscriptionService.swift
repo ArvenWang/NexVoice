@@ -85,6 +85,9 @@ final class TencentCloudRealtimeTranscriptionService: @unchecked Sendable {
             event: "started",
             engineModelType: cloudConfiguration.engineModelType,
             frameDurationMilliseconds: frameDurationMilliseconds,
+            needVAD: cloudConfiguration.needVAD,
+            vadSilenceTime: cloudConfiguration.vadSilenceTime,
+            maxSpeakTime: cloudConfiguration.maxSpeakTime,
             hasHotwords: personalDictionary.hotwordList != nil,
             hotwordCount: personalDictionary.terms.count
         )
@@ -238,12 +241,39 @@ final class TencentCloudRealtimeTranscriptionService: @unchecked Sendable {
         }
 
         var partialText: String?
+        var bestAvailableText: String?
         var isStable = false
         lock.withLock {
             try? transcriptBuffer.apply(message)
             if let result = message.result {
-                partialText = transcriptBuffer.bestAvailableText
+                let currentBestText = transcriptBuffer.bestAvailableText
+                partialText = currentBestText
+                bestAvailableText = currentBestText
                 isStable = result.isStable
+            }
+        }
+        if let result = message.result {
+            let snapshot = lock.withLock {
+                (
+                    sessionID: currentSessionID,
+                    startedAt: startedAt
+                )
+            }
+            if let sessionID = snapshot.sessionID {
+                logASR(
+                    sessionID: sessionID,
+                    event: "result",
+                    latencyMs: snapshot.startedAt.map { Self.milliseconds(from: $0, to: Date()) },
+                    sliceType: result.sliceType.rawValue,
+                    resultIndex: result.index,
+                    resultStartTimeMs: result.startTime,
+                    resultEndTimeMs: result.endTime,
+                    transcriptCharacters: result.voiceText.count,
+                    transcriptPreview: result.voiceText,
+                    bestAvailableCharacters: bestAvailableText?.count,
+                    bestAvailablePreview: bestAvailableText,
+                    isStreamFinal: message.isStreamFinal
+                )
             }
         }
         if let partialText, !partialText.isEmpty {
@@ -372,10 +402,22 @@ final class TencentCloudRealtimeTranscriptionService: @unchecked Sendable {
         event: String,
         engineModelType: String? = nil,
         frameDurationMilliseconds: Int? = nil,
+        needVAD: Bool? = nil,
+        vadSilenceTime: Int? = nil,
+        maxSpeakTime: Int? = nil,
         hasHotwords: Bool? = nil,
         hotwordCount: Int? = nil,
         latencyMs: Int? = nil,
         finishToFinalMs: Int? = nil,
+        sliceType: Int? = nil,
+        resultIndex: Int? = nil,
+        resultStartTimeMs: Int? = nil,
+        resultEndTimeMs: Int? = nil,
+        transcriptCharacters: Int? = nil,
+        transcriptPreview: String? = nil,
+        bestAvailableCharacters: Int? = nil,
+        bestAvailablePreview: String? = nil,
+        isStreamFinal: Bool? = nil,
         partialCharacters: Int? = nil,
         finalCharacters: Int? = nil,
         partialPreview: String? = nil,
@@ -386,17 +428,29 @@ final class TencentCloudRealtimeTranscriptionService: @unchecked Sendable {
             await diagnosticsLogger.log(
                 TencentCloudASRDiagnosticEvent(
                     sessionID: sessionID,
-                    event: event,
-                    engineModelType: engineModelType,
-                    frameDurationMilliseconds: frameDurationMilliseconds,
-                    hasHotwords: hasHotwords,
-                    hotwordCount: hotwordCount,
-                    latencyMs: latencyMs,
-                    finishToFinalMs: finishToFinalMs,
-                    partialCharacters: partialCharacters,
-                    finalCharacters: finalCharacters,
-                    partialPreview: partialPreview,
-                    finalPreview: finalPreview,
+                event: event,
+                engineModelType: engineModelType,
+                frameDurationMilliseconds: frameDurationMilliseconds,
+                needVAD: needVAD,
+                vadSilenceTime: vadSilenceTime,
+                maxSpeakTime: maxSpeakTime,
+                hasHotwords: hasHotwords,
+                hotwordCount: hotwordCount,
+                latencyMs: latencyMs,
+                finishToFinalMs: finishToFinalMs,
+                sliceType: sliceType,
+                resultIndex: resultIndex,
+                resultStartTimeMs: resultStartTimeMs,
+                resultEndTimeMs: resultEndTimeMs,
+                transcriptCharacters: transcriptCharacters,
+                transcriptPreview: transcriptPreview,
+                bestAvailableCharacters: bestAvailableCharacters,
+                bestAvailablePreview: bestAvailablePreview,
+                isStreamFinal: isStreamFinal,
+                partialCharacters: partialCharacters,
+                finalCharacters: finalCharacters,
+                partialPreview: partialPreview,
+                finalPreview: finalPreview,
                     errorMessage: errorMessage
                 )
             )

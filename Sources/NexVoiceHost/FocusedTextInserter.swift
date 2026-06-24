@@ -126,6 +126,17 @@ final class FocusedTextInserter {
         return Self.focusedTextPreview(from: elementChain)
     }
 
+    func focusedInputFrame(in targetApplication: NSRunningApplication?) -> CGRect? {
+        let focusedElement = Self.focusedElement(in: targetApplication) ?? Self.systemFocusedElement()
+        let elementChain = focusedElement.map { Self.elementAndParents(from: $0, maxDepth: 4) } ?? []
+        for element in elementChain where Self.isEditableTextElement(element) {
+            if let frame = Self.frameAttribute(on: element) {
+                return frame
+            }
+        }
+        return Self.bottomEditableInputFrame(in: targetApplication)
+    }
+
     @discardableResult
     static func requestAccessibilityPermission() -> Bool {
         let trusted = SystemPermissionRequester.requestAccessibilityPermission(prompt: true)
@@ -167,6 +178,70 @@ final class FocusedTextInserter {
             return nil
         }
         return (focusedObject as! AXUIElement)
+    }
+
+    private static func bottomEditableInputFrame(in targetApplication: NSRunningApplication?) -> CGRect? {
+        guard let processIdentifier = targetApplication?.processIdentifier else { return nil }
+        let applicationElement = AXUIElementCreateApplication(processIdentifier)
+        var roots: [AXUIElement] = []
+        if let focusedWindow = elementAttribute(kAXFocusedWindowAttribute as String, on: applicationElement) {
+            roots.append(focusedWindow)
+        }
+        roots.append(contentsOf: elementArrayAttribute(kAXWindowsAttribute as String, on: applicationElement))
+
+        var candidates: [CGRect] = []
+        var visited = 0
+        for root in roots {
+            let windowFrame = frameAttribute(on: root)
+            collectEditableInputFrames(
+                from: root,
+                windowFrame: windowFrame,
+                candidates: &candidates,
+                visited: &visited,
+                maxNodes: 500
+            )
+        }
+
+        return candidates.max { lhs, rhs in
+            if abs(lhs.minY - rhs.minY) > 8 {
+                return lhs.minY < rhs.minY
+            }
+            return lhs.width < rhs.width
+        }
+    }
+
+    private static func collectEditableInputFrames(
+        from element: AXUIElement,
+        windowFrame: CGRect?,
+        candidates: inout [CGRect],
+        visited: inout Int,
+        maxNodes: Int
+    ) {
+        guard visited < maxNodes else { return }
+        visited += 1
+
+        if isEditableTextElement(element), let frame = frameAttribute(on: element),
+           isLikelyBottomInputFrame(frame, in: windowFrame) {
+            candidates.append(frame)
+        }
+
+        for child in elementArrayAttribute(kAXChildrenAttribute as String, on: element) {
+            collectEditableInputFrames(
+                from: child,
+                windowFrame: windowFrame,
+                candidates: &candidates,
+                visited: &visited,
+                maxNodes: maxNodes
+            )
+        }
+    }
+
+    private static func isLikelyBottomInputFrame(_ frame: CGRect, in windowFrame: CGRect?) -> Bool {
+        guard frame.width >= 120, frame.height >= 18, frame.height <= 520 else { return false }
+        guard let windowFrame else { return true }
+        guard frame.intersects(windowFrame) else { return false }
+        guard frame.minY >= windowFrame.minY + windowFrame.height * 0.45 else { return false }
+        return true
     }
 
     private static func systemFocusedElement() -> AXUIElement? {
@@ -273,6 +348,24 @@ final class FocusedTextInserter {
         return object as? String
     }
 
+    private static func elementAttribute(_ attribute: String, on element: AXUIElement) -> AXUIElement? {
+        var object: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &object) == .success,
+              let object else {
+            return nil
+        }
+        return (object as! AXUIElement)
+    }
+
+    private static func elementArrayAttribute(_ attribute: String, on element: AXUIElement) -> [AXUIElement] {
+        var object: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &object) == .success,
+              let objects = object as? [AnyObject] else {
+            return []
+        }
+        return objects.map { $0 as! AXUIElement }
+    }
+
     private static func boolAttribute(_ attribute: String, on element: AXUIElement) -> Bool? {
         var object: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, attribute as CFString, &object) == .success,
@@ -288,6 +381,46 @@ final class FocusedTextInserter {
             return nil
         }
         return range(from: object)
+    }
+
+    private static func frameAttribute(on element: AXUIElement) -> CGRect? {
+        guard let position = pointAttribute(kAXPositionAttribute as String, on: element),
+              let size = sizeAttribute(kAXSizeAttribute as String, on: element),
+              size.width > 20,
+              size.height > 10 else {
+            return nil
+        }
+        return CGRect(origin: position, size: size)
+    }
+
+    private static func pointAttribute(_ attribute: String, on element: AXUIElement) -> CGPoint? {
+        var object: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &object) == .success,
+              let object,
+              CFGetTypeID(object) == AXValueGetTypeID() else {
+            return nil
+        }
+        let value = object as! AXValue
+        var point = CGPoint.zero
+        guard AXValueGetValue(value, .cgPoint, &point) else {
+            return nil
+        }
+        return point
+    }
+
+    private static func sizeAttribute(_ attribute: String, on element: AXUIElement) -> CGSize? {
+        var object: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &object) == .success,
+              let object,
+              CFGetTypeID(object) == AXValueGetTypeID() else {
+            return nil
+        }
+        let value = object as! AXValue
+        var size = CGSize.zero
+        guard AXValueGetValue(value, .cgSize, &size) else {
+            return nil
+        }
+        return size
     }
 
     private static func range(from object: Any?) -> CFRange? {

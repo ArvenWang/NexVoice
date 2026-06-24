@@ -49,10 +49,22 @@ struct TencentCloudASRDiagnosticEvent: Encodable {
     let event: String
     let engineModelType: String?
     let frameDurationMilliseconds: Int?
+    let needVAD: Bool?
+    let vadSilenceTime: Int?
+    let maxSpeakTime: Int?
     let hasHotwords: Bool?
     let hotwordCount: Int?
     let latencyMs: Int?
     let finishToFinalMs: Int?
+    let sliceType: Int?
+    let resultIndex: Int?
+    let resultStartTimeMs: Int?
+    let resultEndTimeMs: Int?
+    let transcriptCharacters: Int?
+    let transcriptPreview: String?
+    let bestAvailableCharacters: Int?
+    let bestAvailablePreview: String?
+    let isStreamFinal: Bool?
     let partialCharacters: Int?
     let finalCharacters: Int?
     let partialPreview: String?
@@ -64,10 +76,22 @@ struct TencentCloudASRDiagnosticEvent: Encodable {
         event: String,
         engineModelType: String? = nil,
         frameDurationMilliseconds: Int? = nil,
+        needVAD: Bool? = nil,
+        vadSilenceTime: Int? = nil,
+        maxSpeakTime: Int? = nil,
         hasHotwords: Bool? = nil,
         hotwordCount: Int? = nil,
         latencyMs: Int? = nil,
         finishToFinalMs: Int? = nil,
+        sliceType: Int? = nil,
+        resultIndex: Int? = nil,
+        resultStartTimeMs: Int? = nil,
+        resultEndTimeMs: Int? = nil,
+        transcriptCharacters: Int? = nil,
+        transcriptPreview: String? = nil,
+        bestAvailableCharacters: Int? = nil,
+        bestAvailablePreview: String? = nil,
+        isStreamFinal: Bool? = nil,
         partialCharacters: Int? = nil,
         finalCharacters: Int? = nil,
         partialPreview: String? = nil,
@@ -79,10 +103,22 @@ struct TencentCloudASRDiagnosticEvent: Encodable {
         self.event = event
         self.engineModelType = engineModelType
         self.frameDurationMilliseconds = frameDurationMilliseconds
+        self.needVAD = needVAD
+        self.vadSilenceTime = vadSilenceTime
+        self.maxSpeakTime = maxSpeakTime
         self.hasHotwords = hasHotwords
         self.hotwordCount = hotwordCount
         self.latencyMs = latencyMs
         self.finishToFinalMs = finishToFinalMs
+        self.sliceType = sliceType
+        self.resultIndex = resultIndex
+        self.resultStartTimeMs = resultStartTimeMs
+        self.resultEndTimeMs = resultEndTimeMs
+        self.transcriptCharacters = transcriptCharacters
+        self.transcriptPreview = transcriptPreview.map { Self.preview($0) }
+        self.bestAvailableCharacters = bestAvailableCharacters
+        self.bestAvailablePreview = bestAvailablePreview.map { Self.preview($0) }
+        self.isStreamFinal = isStreamFinal
         self.partialCharacters = partialCharacters
         self.finalCharacters = finalCharacters
         self.partialPreview = partialPreview.map { Self.preview($0) }

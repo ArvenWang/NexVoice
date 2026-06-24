@@ -14,6 +14,7 @@ public enum VoiceWaveformDisplayPolicy {
     public static let transcriptTextInset: CGFloat = 6
     public static let floatingScrollerGutter: CGFloat = 24
     public static let floatingScrollerRightInset: CGFloat = 8
+    public static let contextualResultActionHeight: CGFloat = 22
     public static let topPadding: CGFloat = horizontalPadding
     public static let textWaveformSpacing: CGFloat = 8
     public static let bottomPadding: CGFloat = horizontalPadding
@@ -38,7 +39,11 @@ public enum VoiceWaveformDisplayPolicy {
     }
 
     public static var maximumResultTextHeight: CGFloat {
-        maximumResultPanelHeight - topPadding - bottomPadding
+        maximumResultPanelHeight
+            - topPadding
+            - textWaveformSpacing
+            - contextualResultActionHeight
+            - bottomPadding
     }
 
     public static func expandedPanelHeight(for measuredTextHeight: CGFloat) -> CGFloat {
@@ -48,7 +53,11 @@ public enum VoiceWaveformDisplayPolicy {
 
     public static func resultPanelHeight(for measuredTextHeight: CGFloat) -> CGFloat {
         let textHeight = clamp(measuredTextHeight, min: 28, max: maximumResultTextHeight)
-        return topPadding + textHeight + bottomPadding
+        return topPadding
+            + textHeight
+            + textWaveformSpacing
+            + contextualResultActionHeight
+            + bottomPadding
     }
 
     public static func waveBarRects(

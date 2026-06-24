@@ -10,6 +10,8 @@ final class VoiceCaptionPanelController {
     private let stackView = NSStackView()
     private let transcriptScrollView = NSScrollView()
     private let transcriptTextView = NSTextView()
+    private let contextualActionsView = NSView()
+    private let copyResultButton = NSButton(title: "", target: nil, action: nil)
     private let waveformContainer = NSView()
     private let waveformView = VoiceWaveformView()
     private let loadingStackView = NSStackView()
@@ -30,8 +32,10 @@ final class VoiceCaptionPanelController {
     private var transcriptRevealStartTime = Date()
     private var showsWaveformInTextPanel = true
     private var contextualAnchorRect: CGRect?
+    private var contextualResultText = ""
     private var isInteractiveContextualResult = false
     private var retryAction: (() -> Void)?
+    private var copyFeedbackTask: Task<Void, Never>?
     private var outsideClickGlobalMonitor: Any?
     private var outsideClickLocalMonitor: Any?
 
@@ -218,6 +222,11 @@ final class VoiceCaptionPanelController {
         waveformView.setAmplitude(0)
         waveformView.setActive(false)
         showsWaveformInTextPanel = true
+        contextualResultText = ""
+        copyFeedbackTask?.cancel()
+        copyFeedbackTask = nil
+        resetCopyResultButton()
+        contextualActionsView.isHidden = true
         waveformContainer.isHidden = false
         waveformHeightConstraint?.constant = VoiceWaveformDisplayPolicy.waveformSize.height
         cancelTranscriptReveal()
@@ -243,11 +252,14 @@ final class VoiceCaptionPanelController {
     func showContextualResult(_ text: String, anchorRect: CGRect? = nil) {
         cancelScheduledHide()
         configureInteractiveContextualResult(anchorRect: anchorRect)
+        contextualResultText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        resetCopyResultButton()
         loadingIndicator.stopAnimation(nil)
         loadingIndicator.isHidden = false
         waveformView.setActive(false)
         waveformView.setAmplitude(0)
         showsWaveformInTextPanel = false
+        contextualActionsView.isHidden = false
         waveformContainer.isHidden = true
         waveformHeightConstraint?.constant = 0
         showRecordingContent()
@@ -282,6 +294,7 @@ final class VoiceCaptionPanelController {
         stageView.layer?.backgroundColor = NSColor.clear.cgColor
 
         configureTranscriptView()
+        configureContextualActionsView()
         configureWaveformContainer()
         configureLoadingView()
         stackView.alphaValue = 1
@@ -298,6 +311,7 @@ final class VoiceCaptionPanelController {
         )
         stackView.translatesAutoresizingMaskIntoConstraints = false
         stackView.addArrangedSubview(transcriptScrollView)
+        stackView.addArrangedSubview(contextualActionsView)
         stackView.addArrangedSubview(waveformContainer)
 
         rootView.addSubview(stackView)
@@ -327,6 +341,8 @@ final class VoiceCaptionPanelController {
             stackView.bottomAnchor.constraint(equalTo: rootView.bottomAnchor),
 
             transcriptScrollView.widthAnchor.constraint(equalToConstant: VoiceWaveformDisplayPolicy.textContentWidth),
+            contextualActionsView.widthAnchor.constraint(equalToConstant: VoiceWaveformDisplayPolicy.textContentWidth),
+            contextualActionsView.heightAnchor.constraint(equalToConstant: VoiceWaveformDisplayPolicy.contextualResultActionHeight),
             waveformContainer.widthAnchor.constraint(equalToConstant: VoiceWaveformDisplayPolicy.waveformSize.width),
 
             loadingStackView.centerXAnchor.constraint(equalTo: rootView.centerXAnchor),
@@ -375,6 +391,32 @@ final class VoiceCaptionPanelController {
         transcriptTextView.font = .systemFont(ofSize: VoiceWaveformDisplayPolicy.transcriptFontSize, weight: .medium)
         transcriptTextView.textColor = NSColor.white.withAlphaComponent(0.94)
         transcriptScrollView.documentView = transcriptTextView
+    }
+
+    private func configureContextualActionsView() {
+        contextualActionsView.translatesAutoresizingMaskIntoConstraints = false
+        contextualActionsView.isHidden = true
+
+        copyResultButton.target = self
+        copyResultButton.action = #selector(copyContextualResult)
+        copyResultButton.isBordered = false
+        copyResultButton.bezelStyle = .regularSquare
+        copyResultButton.imagePosition = .imageOnly
+        copyResultButton.imageScaling = .scaleProportionallyDown
+        copyResultButton.contentTintColor = NSColor.white.withAlphaComponent(0.72)
+        copyResultButton.toolTip = "复制"
+        copyResultButton.refusesFirstResponder = true
+        copyResultButton.translatesAutoresizingMaskIntoConstraints = false
+        setCopyResultButtonIcon(systemName: "doc.on.doc", accessibilityDescription: "复制")
+
+        contextualActionsView.addSubview(copyResultButton)
+
+        NSLayoutConstraint.activate([
+            copyResultButton.trailingAnchor.constraint(equalTo: contextualActionsView.trailingAnchor),
+            copyResultButton.centerYAnchor.constraint(equalTo: contextualActionsView.centerYAnchor),
+            copyResultButton.widthAnchor.constraint(equalToConstant: VoiceWaveformDisplayPolicy.contextualResultActionHeight),
+            copyResultButton.heightAnchor.constraint(equalToConstant: VoiceWaveformDisplayPolicy.contextualResultActionHeight)
+        ])
     }
 
     private func configureWaveformContainer() {
@@ -740,6 +782,11 @@ final class VoiceCaptionPanelController {
     private func configurePassivePanel(anchorRect: CGRect? = nil) {
         isInteractiveContextualResult = false
         contextualAnchorRect = anchorRect
+        contextualResultText = ""
+        contextualActionsView.isHidden = true
+        copyFeedbackTask?.cancel()
+        copyFeedbackTask = nil
+        resetCopyResultButton()
         panel.ignoresMouseEvents = true
         transcriptTextView.isSelectable = false
         removeOutsideClickMonitor()
@@ -748,6 +795,11 @@ final class VoiceCaptionPanelController {
     private func configureRetryPanel() {
         isInteractiveContextualResult = false
         contextualAnchorRect = nil
+        contextualResultText = ""
+        contextualActionsView.isHidden = true
+        copyFeedbackTask?.cancel()
+        copyFeedbackTask = nil
+        resetCopyResultButton()
         panel.ignoresMouseEvents = false
         transcriptTextView.isSelectable = false
         removeOutsideClickMonitor()
@@ -821,6 +873,11 @@ final class VoiceCaptionPanelController {
         hideWorkItem = nil
         retryAction = nil
         retryButton.isHidden = true
+        contextualActionsView.isHidden = true
+        contextualResultText = ""
+        copyFeedbackTask?.cancel()
+        copyFeedbackTask = nil
+        resetCopyResultButton()
         configurePassivePanel()
         waveformView.setActive(false)
         waveformView.setAmplitude(0)
@@ -854,6 +911,37 @@ final class VoiceCaptionPanelController {
         self.retryAction = nil
         retryButton.isHidden = true
         retryAction()
+    }
+
+    @objc private func copyContextualResult() {
+        let text = contextualResultText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+
+        copyFeedbackTask?.cancel()
+        setCopyResultButtonIcon(systemName: "checkmark", accessibilityDescription: "已复制")
+        copyResultButton.contentTintColor = NSColor.systemGreen.withAlphaComponent(0.82)
+        copyFeedbackTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            guard let self, !Task.isCancelled else { return }
+            self.setCopyResultButtonIcon(systemName: "doc.on.doc", accessibilityDescription: "复制")
+            self.copyResultButton.contentTintColor = NSColor.white.withAlphaComponent(0.72)
+            self.copyFeedbackTask = nil
+        }
+    }
+
+    private func setCopyResultButtonIcon(systemName: String, accessibilityDescription: String) {
+        copyResultButton.image = NSImage(
+            systemSymbolName: systemName,
+            accessibilityDescription: accessibilityDescription
+        )
+        copyResultButton.setAccessibilityLabel(accessibilityDescription)
+    }
+
+    private func resetCopyResultButton() {
+        setCopyResultButtonIcon(systemName: "doc.on.doc", accessibilityDescription: "复制")
+        copyResultButton.contentTintColor = NSColor.white.withAlphaComponent(0.72)
     }
 
     private func cancelScheduledHide() {

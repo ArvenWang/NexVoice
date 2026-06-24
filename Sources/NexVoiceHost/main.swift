@@ -453,7 +453,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             let capturedContext: ScreenReplyCapturedContext
             do {
-                capturedContext = try await self.screenReplyCaptureService.capture(from: targetApplication)
+                let focusedInputFrame = self.textInserter.focusedInputFrame(in: targetApplication)
+                capturedContext = try await self.screenReplyCaptureService.capture(
+                    from: targetApplication,
+                    focusedInputFrame: focusedInputFrame
+                )
             } catch is CancellationError {
                 return
             } catch {
@@ -822,6 +826,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rewriteTask?.cancel()
         rewriteTask = Task { [weak self] in
             guard let self else { return }
+            await ScreenReplyDiagnosticsLogger.shared.log(
+                ScreenReplyDiagnosticEvent(
+                    captureID: capturedContext.captureID,
+                    event: "generating",
+                    appName: capturedContext.appName,
+                    bundleIdentifier: capturedContext.bundleIdentifier,
+                    windowTitle: capturedContext.windowTitle,
+                    inputFrame: capturedContext.inputFrameInWindow,
+                    replyRegion: capturedContext.replyRegionInWindow,
+                    lineCount: capturedContext.lineCount,
+                    visibleText: capturedContext.visibleText,
+                    structuredMessages: capturedContext.structuredMessages,
+                    lines: capturedContext.lines,
+                    voiceInstruction: trimmedInstruction
+                )
+            )
             let reply: String
             do {
                 reply = try await self.finalRewriteService.handleScreenReply(
@@ -835,6 +855,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } catch is CancellationError {
                 return
             } catch {
+                await ScreenReplyDiagnosticsLogger.shared.log(
+                    ScreenReplyDiagnosticEvent(
+                        captureID: capturedContext.captureID,
+                        event: "failed",
+                        appName: capturedContext.appName,
+                        bundleIdentifier: capturedContext.bundleIdentifier,
+                        windowTitle: capturedContext.windowTitle,
+                        inputFrame: capturedContext.inputFrameInWindow,
+                        replyRegion: capturedContext.replyRegionInWindow,
+                        lineCount: capturedContext.lineCount,
+                        visibleText: capturedContext.visibleText,
+                        structuredMessages: capturedContext.structuredMessages,
+                        lines: capturedContext.lines,
+                        voiceInstruction: trimmedInstruction,
+                        errorMessage: error.localizedDescription
+                    )
+                )
                 await MainActor.run {
                     guard !self.isCurrentSessionCancelled else { return }
                     self.finishScreenReplyWithError(error)
@@ -842,6 +879,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             guard !Task.isCancelled else { return }
+            await ScreenReplyDiagnosticsLogger.shared.log(
+                ScreenReplyDiagnosticEvent(
+                    captureID: capturedContext.captureID,
+                    event: "succeeded",
+                    appName: capturedContext.appName,
+                    bundleIdentifier: capturedContext.bundleIdentifier,
+                    windowTitle: capturedContext.windowTitle,
+                    inputFrame: capturedContext.inputFrameInWindow,
+                    replyRegion: capturedContext.replyRegionInWindow,
+                    lineCount: capturedContext.lineCount,
+                    visibleText: capturedContext.visibleText,
+                    structuredMessages: capturedContext.structuredMessages,
+                    lines: capturedContext.lines,
+                    voiceInstruction: trimmedInstruction,
+                    reply: reply
+                )
+            )
 
             await MainActor.run {
                 guard !self.isCurrentSessionCancelled else { return }

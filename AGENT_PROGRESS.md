@@ -1,16 +1,173 @@
 # NexVoice 当前进展
 
-更新时间：2026-06-24
+更新时间：2026-06-25
 
 ## 当前状态
 
-- 当前工作目录：`/Users/nefish/Desktop/WorkSpace/Coding/NexVoice`。
+- 当前工作目录：`/Users/nefish/Desktop/Coding/NexVoice`。
 - 项目形态：SwiftPM macOS 菜单栏 App，核心模块为 `NexVoiceCore`，宿主为 `NexVoiceHost`。
 - 默认入口：短按右 Alt 开始语音输入，再按一次结束；长按右 Alt 约 0.55 秒进入看屏自动回复；ESC 可取消录音、等待 final、AI 改写或看屏回复中的会话。
 - 当前主链路：腾讯云实时 ASR `16k_zh_en` -> DeepSeek `deepseek-v4-flash` 最终整理 -> 写入当前聚焦输入框。
 - 本地 SenseVoice Small 和 WhisperKit large-v3 保留为兜底和质量对照，不是当前默认主链路。
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
+
+## 本轮完成（2026-06-25：看屏回复 OCR 诊断与长语音截断排查）
+
+- 新增 `Sources/NexVoiceHost/ScreenReplyDiagnosticsLogger.swift`，看屏回复会写入本地日志：`~/Library/Application Support/NexVoice/Logs/ScreenReply.jsonl`。
+- `ScreenReply.jsonl` 记录每次看屏回复的 `captureID`、前台应用、窗口标题、OCR 原文、结构化 `我 / 对方 / 未知` 消息、每一行 OCR 的坐标和置信度、语音指令、最终回复或错误信息；用于定位“究竟读到了什么”和为什么复读上文。
+- 看屏回复逻辑未加“相似度硬拦截”或“不输出提示”，保留用户要求的两个状态：有语音指令时结合指令回复；无语音指令时直接根据可见内容回复。
+- 长语音截断排查：最新日志中用户 42 秒语音只返回了前半段，代码里腾讯云 `max_speak_time` 之前写死为 `10000ms`。腾讯云该参数是连续说话强制断句配置，当前已调到 `90000ms`，降低长语音被过早切段后丢尾部的概率。
+- `TencentCloudASR.jsonl` 增加逐分片诊断：每个识别分片会记录 `sliceType`、`resultIndex`、起止时间、分片文本、当前拼接文本、`maxSpeakTime`、`vadSilenceTime` 等字段；下次复现可以判断是腾讯云没返回尾段，还是本地拼接逻辑丢段。
+- 版本递增：`0.1.11 (12)` -> `0.1.12 (13)`。
+- 已构建并安装新版：`/Applications/NexVoice.app`；旧版备份：`dist/install-backups/NexVoice-20260625-005151.app`。
+- 验证：`git diff --check` 通过；`swift test --disable-sandbox --quiet` 通过，140 个测试；`CLANG_MODULE_CACHE_PATH=.build/module-cache swift build --disable-sandbox --product NexVoiceApp` 通过；`./scripts/build_app.sh release --embed-local-keys` 通过；安装包签名、版本和资源检查通过。
+
+## 本轮追加（2026-06-25：看屏回复重复输出定位与过滤）
+
+- 用户连续复现 3 次企业微信看屏回复：
+  - 第一次输出完全复读了屏幕里已有的上一条回复：“那外包团队视觉水平确实不太行...”
+  - 后两次都输出同一句：“你感觉咋样？好用吗？”，而这句话也已经在 OCR 中出现并被标成“我”。
+- 日志结论：`ScreenReply.jsonl` 证明 OCR 把企业微信左侧导航、会话列表、时间标签、多个历史消息和当前聊天混在一起；传给模型的上下文不够聚焦，模型把可见的“我方旧消息”当成可输出回复。
+- 修复：
+  - 企业微信 / 微信场景生成回复时，只使用主聊天区 OCR 行，过滤左侧导航、会话列表、时间标签、明显 UI 文案和链接；完整 OCR 行仍保留在日志。
+  - `ScreenReplyCapturedLine` 增加 `includedInReplyContext`，下一次可以直接看每行 OCR 是否真正参与生成。
+  - 调整左右角色判断：右侧或横跨到右侧的气泡更稳定标为“我”，左侧主聊天气泡标为“对方”。
+  - Prompt 增加非硬拦截规则：`我：` 内容是用户已说过/输入过/刚生成过的旧消息，不能作为本次输出；连续触发相同上下文时也要生成一条新的可发送回复。
+- 版本递增：`0.1.12 (13)` -> `0.1.13 (14)`。
+- 已构建并安装新版：`/Applications/NexVoice.app`；旧版备份：`dist/install-backups/NexVoice-20260625-005942.app`。
+- 验证：`git diff --check` 通过；`swift test --disable-sandbox --quiet` 通过，140 个测试；调试构建通过；`./scripts/build_app.sh release --embed-local-keys` 通过；安装包签名、版本和资源检查通过。
+
+## 本轮追加（2026-06-25：看屏回复输入框锚点区域）
+
+- 根据用户确认的规则，把看屏回复生成上下文改成“以当前输入框为基准，左右扩展一点，向上取同一列内容”。
+- 新增 `FocusedTextInserter.focusedInputFrame(in:)`，通过辅助功能读取当前可编辑输入框的屏幕位置和大小。
+- `ScreenReplyContextCaptureService` 会把输入框屏幕坐标换算到窗口截图坐标，计算 `replyRegion`：
+  - 横向：输入框左右各扩展约 12%，限制在 80-160px，并保证最小宽度约 620px。
+  - 纵向：从窗口顶部到输入框上方，避开输入框当前草稿内容。
+  - 能拿到输入框时优先用该区域过滤 OCR；拿不到输入框时回退到之前的聊天 App 过滤策略。
+- `ScreenReply.jsonl` 增加 `inputFrame` 和 `replyRegion` 字段，`includedInReplyContext` 继续标记每行 OCR 是否真的参与生成，便于下一轮确认截取范围是否准确。
+- 版本递增：`0.1.13 (14)` -> `0.1.14 (15)`。
+- 已构建并安装新版：`/Applications/NexVoice.app`；旧版备份：`dist/install-backups/NexVoice-20260625-011247.app`。
+- 验证：`git diff --check` 通过；`swift test --disable-sandbox --quiet` 通过，140 个测试；调试构建通过；`./scripts/build_app.sh release --embed-local-keys` 通过；安装包签名、版本和资源检查通过。
+
+## 本轮追加（2026-06-25：看屏回复区域左侧安全线）
+
+- 用户复测 `0.1.14` 后，日志显示输入框锚点已生效，但 `replyRegion.x` 仍从 `x=225/231` 开始，企业微信左侧会话列表仍进入生成上下文，导致“好的，收到。”和复述上文。
+- 调整 `replyRegion` 策略：
+  - 聊天 App 下左侧只少量扩展输入框，约 4%，限制 20-48px。
+  - 聊天 App 下右侧多扩展，约 18%，限制 120-240px。
+  - 聊天 App 下增加左侧安全线：`replyRegion.x >= imageWidth * 0.34`，避免切入企业微信/微信左侧会话列表。
+  - 非聊天 App 仍使用通用左右扩展策略。
+- 版本递增：`0.1.14 (15)` -> `0.1.15 (16)`。
+- 已构建并安装新版：`/Applications/NexVoice.app`；旧版备份：`dist/install-backups/NexVoice-20260625-012309.app`。
+- 验证：`git diff --check` 通过；`swift test --disable-sandbox --quiet` 通过，140 个测试；调试构建通过；`./scripts/build_app.sh release --embed-local-keys` 通过；安装包签名、版本和资源检查通过。
+
+## 本轮追加（2026-06-25：修正输入框坐标单位）
+
+- 用户指出企业微信里输入框和上方消息视觉上基本纵向对齐，怀疑不是输入框本身错位。
+- 复查日志后确认：`inputFrame.x=311` 看似偏左，但这是系统辅助功能返回的屏幕点坐标；OCR 行坐标来自窗口截图像素坐标。在 Retina 屏上两者通常差约 2 倍，之前代码直接混用，导致 `replyRegion` 被整体算偏左，企业微信左侧会话列表被误纳入生成上下文。
+- 修复：`ScreenReplyContextCaptureService.inputFrameInWindow(...)` 现在会根据窗口点尺寸和截图像素尺寸计算 `scaleX / scaleY`，把输入框坐标转换成截图像素坐标后再计算 `replyRegion`。
+- 版本递增：`0.1.15 (16)` -> `0.1.16 (17)`。
+- 已构建并安装新版：`/Applications/NexVoice.app`；旧版备份：`dist/install-backups/NexVoice-20260625-013305.app`。
+- 验证：`git diff --check` 通过；`swift test --disable-sandbox --quiet` 通过，140 个测试；`./scripts/build_app.sh release --embed-local-keys` 通过；`dist/NexVoice.app` 和 `/Applications/NexVoice.app` 签名、版本、资源检查通过；新版进程已启动。
+- 下一轮复测重点：用户在企业微信复测后，新的 `ScreenReply.jsonl` 中 `inputFrame.x` 应接近原来的 2 倍，`replyRegion.x` 应明显避开左侧会话列表。
+
+## 本轮追加（2026-06-25：聊天输入框宽度自适应）
+
+- 用户确认企业微信不希望再做横向扩展，期望所有窗口宽度下都按当前输入框宽度向上取同一列聊天内容。
+- 修复：
+  - 聊天 App（企业微信 / 微信）一旦拿到输入框区域，`replyRegion` 不再左右扩展，左右边界直接使用输入框左右边界，避免企业微信右侧群公告 / 群成员栏混入上下文。
+  - `FocusedTextInserter.focusedInputFrame(in:)` 增加应用无障碍树扫描兜底：如果当前聚焦元素不是输入框，会扫描当前应用窗口里的底部可编辑文本元素，优先选择最靠近窗口底部、宽度更大的候选输入框。
+  - 微信拿不到 AX 输入框时，`ScreenReplyContextCaptureService` 会用 OCR 识别到的底部输入占位文案（如“输入文字，或按住Fn使用语音输入”）推算聊天列，作为最后兜底；该推算基于截图宽度比例和占位文案位置，不依赖固定窗口大小。
+- 版本递增：`0.1.16 (17)` -> `0.1.17 (18)`。
+- 已构建并安装新版：`/Applications/NexVoice.app`；旧版备份：`dist/install-backups/NexVoice-20260625-014237.app`。
+- 验证：`git diff --check` 通过；`swift test --disable-sandbox --quiet` 通过，140 个测试；`./scripts/build_app.sh release --embed-local-keys` 通过；`dist/NexVoice.app` 和 `/Applications/NexVoice.app` 签名、版本、资源检查通过；新版进程已启动。
+- 下一轮复测重点：在企业微信和微信分别用全屏、小窗口、窄窗口复测；日志中企业微信 `replyRegion.x / width` 应贴合输入框，不再包含右侧栏；微信应尽量出现 `inputFrame` / `replyRegion`，且不混入左侧群聊列表。
+
+## 本轮追加（2026-06-25：微信左侧群聊列表二次过滤）
+
+- 用户在企业微信和微信复测 `0.1.17 (18)`：
+  - 企业微信效果明显改善，`replyRegion=(x:622,w:896)`，右侧群公告 / 群成员栏基本不再进入生成上下文。
+  - 微信已经能拿到 `inputFrame/replyRegion`，但 `inputFrame.x=401,w=1062` 实际是底部大容器，不是真正输入文字区域；左侧群聊列表部分长标题和时间戳仍进入上下文。
+- 修复：
+  - `shouldIncludeInReplyContext` 在存在 `replyRegion` 时不再只判断矩形相交，还要求 OCR 行的起点进入回复列，避免左侧列表长标题“擦边”进入。
+  - 微信场景下，如果 OCR 识别到底部输入占位文案（如“输入文字，或按住Fn使用语音输入”），会用该占位文案修正 `inputFrame` 左边界；右边界仍保留 AX 输入容器右边界，确保全屏、小窗口、窄窗口都跟随当前窗口布局。
+- 版本递增：`0.1.17 (18)` -> `0.1.18 (19)`。
+- 已构建并安装新版：`/Applications/NexVoice.app`；旧版备份：`dist/install-backups/NexVoice-20260625-022306.app`。
+- 验证：`git diff --check` 通过；`swift test --disable-sandbox --quiet` 通过，140 个测试；`./scripts/build_app.sh release --embed-local-keys` 通过；`dist/NexVoice.app` 和 `/Applications/NexVoice.app` 签名、版本、资源检查通过；新版进程已启动。
+- 下一轮复测重点：微信日志中的 `replyRegion.x` 应从约 `401` 收窄到约 `620+`，左侧群聊列表的标题和时间戳不应再 `includedInReplyContext=true`。
+
+## 本轮追加（2026-06-25：Chrome/Twitter 与飞书上下文裁剪）
+
+- 用户在微信、Twitter/Chrome、飞书复测 `0.1.18 (19)`：
+  - 微信已基本正确，`replyRegion.x` 收窄到约 `614/619`，左侧群聊列表不再进入上下文。
+  - Twitter/Chrome 能拿到输入框和帖子正文，但通用规则仍向右扩展，导致右侧栏如 Premium、搜索、趋势、推广内容混入上下文。
+  - 飞书仍然 `input=null / region=null`，退回全窗口 OCR，左侧导航、会话列表、当前聊天、右侧话题栏全部混在一起，属于不稳定结果。
+- 修复：
+  - 新增“回复列应用”判断：微信 / 企业微信 / 飞书 / 浏览器类应用拿到输入框后走列裁剪，不再使用通用左右扩展。
+  - Chrome / Edge / Safari 场景保留输入框左侧少量余量，右侧不扩展，用于 Twitter/X 这类三栏页面，避免右栏混入。
+  - 飞书场景新增 OCR 底部输入锚点推断：识别 `发送给...`、`Aa`、`新建话题`、`回复话题` 等底部输入区文案后，推断当前聊天列起点，并排除左侧导航/会话列表。
+- 版本递增：`0.1.18 (19)` -> `0.1.19 (20)`。
+- 已构建并安装新版：`/Applications/NexVoice.app`；旧版备份：`dist/install-backups/NexVoice-20260625-023350.app`。
+- 验证：`git diff --check` 通过；`swift test --disable-sandbox --quiet` 通过，140 个测试；`./scripts/build_app.sh release --embed-local-keys` 通过；`dist/NexVoice.app` 和 `/Applications/NexVoice.app` 签名、版本、资源检查通过；新版进程已启动。
+- 下一轮复测重点：Twitter/Chrome 日志中右侧栏不应再进入 `includedInReplyContext=true`；飞书应出现 `inputFrame/replyRegion`，且 `replyRegion.x` 应避开左侧导航和会话列表。
+
+## 本轮追加（2026-06-25：飞书话题侧栏细分）
+
+- 用户追问飞书是否能判定主聊天列和右侧话题列，以及这些分场景策略是否会污染未测试场景。
+- 结论：
+  - 飞书可以通过底部 OCR 锚点区分：普通聊天输入区常见 `发送给...`；话题侧栏同时出现左侧 `+ 新建话题` 和右侧 `回复话题 / Aa`。
+  - 现有策略按 bundle ID 分支：飞书只作用于 `com.electron.lark`，微信/企业微信只作用于对应腾讯 bundle，浏览器列裁剪只作用于 Chrome / Edge / Safari；原生 Codex App `com.openai.codex` 不会走这些分支。
+- 修复：
+  - 飞书 OCR 底部锚点推断改为：如果同屏存在 `+ 新建话题` 且右侧存在 `回复话题 / Aa`，优先取右侧话题回复列；如果存在 `发送给...`，优先取普通聊天输入列。
+  - 增加少量明显 UI 文案过滤：`Q 搜索`、`草稿`、`回复话题`、`新建话题`、`快捷指令`、`最佳实践`。
+- 版本递增：`0.1.19 (20)` -> `0.1.20 (21)`。
+- 已构建并安装新版：`/Applications/NexVoice.app`；旧版备份：`dist/install-backups/NexVoice-20260625-024051.app`。
+- 验证：`git diff --check` 通过；`swift test --disable-sandbox --quiet` 通过，140 个测试；`./scripts/build_app.sh release --embed-local-keys` 通过；`dist/NexVoice.app` 和 `/Applications/NexVoice.app` 签名、版本检查通过；新版进程已启动。
+- 下一轮复测重点：飞书右侧话题栏场景的 `replyRegion.x` 应进一步右移到话题回复列附近；普通飞书聊天仍应使用 `发送给...` 所在列；Chrome/Twitter 仅保留帖子主体，减少搜索/草稿等 UI 文案。
+
+## 本轮追加（2026-06-25：飞书右侧话题栏宽度阈值）
+
+- 用户复测 `0.1.20 (21)`：
+  - 飞书普通聊天正确，继续使用 `发送给 Nefish的智能伙伴` 所在列，未混入左侧会话列表。
+  - 飞书右侧话题栏仍出现一次 `input=null / region=null`。日志里实际已经 OCR 到右侧底部 `回复话题 / Aa` 和左侧 `+ 新建话题`，但右侧话题栏宽度小于整窗 35%，被上一版可信宽度阈值丢弃。
+- 修复：飞书右侧话题栏专用阈值从整窗 35% 降到 18%；普通飞书聊天仍保留 35% 阈值，避免误判左侧小控件。
+- 版本递增：`0.1.20 (21)` -> `0.1.21 (22)`。
+- 已构建并安装新版：`/Applications/NexVoice.app`；旧版备份：`dist/install-backups/NexVoice-20260625-024643.app`。
+- 验证：`git diff --check` 通过；`swift test --disable-sandbox --quiet` 通过，140 个测试；`./scripts/build_app.sh release --embed-local-keys` 通过；`dist/NexVoice.app` 和 `/Applications/NexVoice.app` 签名、版本检查通过；新版进程已启动。
+- 下一轮复测重点：飞书右侧话题栏应出现 `inputFrame/replyRegion`，`replyRegion.x` 应靠近右侧 `回复话题 / Aa` 输入区。
+
+## 本轮追加（2026-06-25：飞书/Twitter 上下文杂音过滤）
+
+- 用户复测 `0.1.21 (22)` 后查看日志：
+  - 飞书右侧话题栏已能识别到输入列，`replyRegion.x` 从此前约 `754` 收窄并右移到约 `1397/1400`，宽度约 `680`，说明右侧话题栏锚点生效。
+  - 飞书上下文主体正确，但仍混入右侧话题栏顶部按钮（如文件/话题/关闭）和头像/姓名 OCR 碎片（如重复的 `Nefish 1943`）。
+  - Twitter/Chrome 主帖子正文能拿到，但仍混入少量右侧栏固定文案（如搜索、草稿、什么新鲜事）。
+- 修复：
+  - 看屏回复生成前新增行级杂音过滤，继续保留完整 OCR 日志，只减少真正参与生成的行。
+  - 飞书右侧话题栏过滤顶部工具按钮、关闭按钮和大号头像/姓名数字块，降低重复人名/旧上下文误导模型的概率。
+  - 浏览器/Twitter 过滤搜索、草稿、什么新鲜事、正在关注、帖子、显示更多、订阅、推广回复等固定 UI 文案。
+- 版本递增：`0.1.21 (22)` -> `0.1.22 (23)`。
+- 已构建并安装新版：`/Applications/NexVoice.app`；旧版备份：`dist/install-backups/NexVoice-20260625-025202.app`。
+- 验证：`git diff --check` 通过；`swift test --disable-sandbox --quiet` 通过，140 个测试；`./scripts/build_app.sh release --embed-local-keys` 通过；`dist/NexVoice.app` 和 `/Applications/NexVoice.app` 签名、版本检查通过；新版进程已启动，PID 为 `29583`。
+- 下一轮复测重点：飞书右侧话题栏日志中顶部按钮和重复头像名不应再 `includedInReplyContext=true`；Twitter/Chrome 日志中搜索、草稿、什么新鲜事等右侧栏固定文案不应再参与生成。
+
+## 本轮追加（2026-06-25：最终日志复查与推送前收口）
+
+- 用户复测 `0.1.22 (23)` 后复查最新日志：
+  - 飞书右侧话题栏定位保持正确，`replyRegion.x` 仍在约 `1397/1400`，能稳定取右侧话题回复列。
+  - 第一条飞书右侧话题栏日志已很干净，只剩“老周不太周...”这条话题原文和用户问题，生成回复没有复读上方历史消息。
+  - 第二条飞书日志仍残留少量顶部 OCR 误识别（如 `呵。`、`已云文档`、`因`），但主体正文和回复意图正确。
+  - Twitter/Chrome 已不再混入搜索、草稿、什么新鲜事等右栏固定文案，但顶部兴趣标签 `Design Engineers / AI Leaders / AI Founders` 仍会进入上下文。
+- 修复：
+  - 飞书顶部工具区过滤新增 `呵。`、`已云文档`、单字 `因` 等 OCR 误识别。
+  - 浏览器/Twitter 过滤顶部兴趣标签 `Design Engineers`、`AI/Al Leaders`、`AI/Al Founders #1 of 3`。
+  - 保持输入框定位和列裁剪逻辑不变，只收窄真正参与生成的 OCR 行，降低对其他场景的影响。
+- 版本递增：`0.1.22 (23)` -> `0.1.23 (24)`。
+- 已构建并安装新版：`/Applications/NexVoice.app`；旧版备份：`dist/install-backups/NexVoice-20260625-025753.app`。
+- 验证：`git diff --check` 通过；`swift test --disable-sandbox --quiet` 通过，140 个测试；`./scripts/build_app.sh release --embed-local-keys` 通过；`dist/NexVoice.app` 和 `/Applications/NexVoice.app` 签名、版本检查通过；新版进程已启动，PID 为 `41101`。
+- 下一轮复测重点：飞书右侧话题栏顶部 OCR 误识别和 Twitter 顶部兴趣标签不应再进入 `includedInReplyContext=true`。
 
 ## 本轮完成（2026-06-24：设置窗口 Web 化迁移）
 

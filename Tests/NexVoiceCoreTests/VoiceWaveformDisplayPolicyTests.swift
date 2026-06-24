@@ -31,7 +31,16 @@ import Testing
 @Test func waveformDisplayPolicyGivesContextualResultsMoreRoom() {
     #expect(VoiceWaveformDisplayPolicy.maximumPanelHeight == 180)
     #expect(VoiceWaveformDisplayPolicy.maximumResultPanelHeight == 300)
+    #expect(VoiceWaveformDisplayPolicy.contextualResultActionHeight == 22)
     #expect(VoiceWaveformDisplayPolicy.maximumResultTextHeight > VoiceWaveformDisplayPolicy.maximumTextHeight)
+    #expect(
+        VoiceWaveformDisplayPolicy.maximumResultTextHeight
+            == VoiceWaveformDisplayPolicy.maximumResultPanelHeight
+                - VoiceWaveformDisplayPolicy.topPadding
+                - VoiceWaveformDisplayPolicy.textWaveformSpacing
+                - VoiceWaveformDisplayPolicy.contextualResultActionHeight
+                - VoiceWaveformDisplayPolicy.bottomPadding
+    )
     #expect(VoiceWaveformDisplayPolicy.resultPanelHeight(for: 400) == VoiceWaveformDisplayPolicy.maximumResultPanelHeight)
     #expect(VoiceWaveformDisplayPolicy.floatingScrollerGutter == 24)
     #expect(VoiceWaveformDisplayPolicy.transcriptLayoutWidth < VoiceWaveformDisplayPolicy.textContentWidth)

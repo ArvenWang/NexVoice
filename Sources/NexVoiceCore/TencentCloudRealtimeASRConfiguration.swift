@@ -73,7 +73,7 @@ public struct TencentCloudRealtimeASRConfiguration: Equatable, Sendable {
     public var voiceFormat: Int { 1 }
     public var needVAD: Bool { true }
     public var vadSilenceTime: Int { 800 }
-    public var maxSpeakTime: Int { 10_000 }
+    public var maxSpeakTime: Int { 90_000 }
 
     public var unsignedQueryItems: [(String, String)] {
         var items: [(String, String)] = [
