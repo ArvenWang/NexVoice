@@ -2,6 +2,7 @@ import AppKit
 import CoreGraphics
 import Foundation
 import NexVoiceCore
+import QuartzCore
 import WebKit
 
 final class VoiceWebSettingsWindowController: NSWindowController, NSWindowDelegate, WKNavigationDelegate {
@@ -81,6 +82,42 @@ final class VoiceWebSettingsWindowController: NSWindowController, NSWindowDelega
         }
     }
 
+    private final class TitlebarDragView: NSView {
+        override var mouseDownCanMoveWindow: Bool { true }
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+            true
+        }
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            bounds.contains(point) ? self : nil
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            window?.performDrag(with: event)
+        }
+    }
+
+    private final class DraggableSettingsWebView: WKWebView {
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+            true
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            guard let window,
+                  Self.isTitlebarDragPoint(event.locationInWindow, in: window) else {
+                super.mouseDown(with: event)
+                return
+            }
+            window.performDrag(with: event)
+        }
+
+        static func isTitlebarDragPoint(_ point: NSPoint, in window: NSWindow) -> Bool {
+            let height = window.contentView?.bounds.height ?? window.frame.height
+            return point.x >= 84 && point.y >= height - 60
+        }
+    }
+
     private struct ModeDescriptor {
         let style: VoiceRewriteStyle
         let title: String
@@ -126,6 +163,7 @@ final class VoiceWebSettingsWindowController: NSWindowController, NSWindowDelega
     ]
 
     private let webView: WKWebView
+    private let loadingView = NSView()
     private let scriptHandler: ScriptHandler
     private var webViewReady = false
     private var shortcut: VoiceShortcut
@@ -136,6 +174,7 @@ final class VoiceWebSettingsWindowController: NSWindowController, NSWindowDelega
     private var workflowWasManuallySelected = false
     private var dictionaryFilter: DictionaryFilter = .all
     private var localShortcutMonitor: Any?
+    private var titlebarDragMonitor: Any?
     private var isRecordingShortcut = false
 
     private let workflowContextProvider: () -> VoiceRewriteContext
@@ -143,6 +182,8 @@ final class VoiceWebSettingsWindowController: NSWindowController, NSWindowDelega
     private let onShortcutChanged: (VoiceShortcut) -> Void
     private let onOutputLanguageChanged: (VoiceOutputLanguage) -> Void
     private let onRewriteStyleChanged: (VoiceRewriteStyle) -> Void
+    private let workflowRewriteStyleProvider: (String, VoiceRewriteStyle) -> VoiceRewriteStyle
+    private let onWorkflowRewriteStyleChanged: (String, VoiceRewriteStyle) -> Void
     private let onShortcutRecordingStateChanged: (Bool) -> Void
     private let onRequestMicrophonePermission: () -> Void
     private let onRequestAccessibilityPermission: () -> Void
@@ -158,6 +199,8 @@ final class VoiceWebSettingsWindowController: NSWindowController, NSWindowDelega
         onShortcutChanged: @escaping (VoiceShortcut) -> Void,
         onOutputLanguageChanged: @escaping (VoiceOutputLanguage) -> Void,
         onRewriteStyleChanged: @escaping (VoiceRewriteStyle) -> Void,
+        workflowRewriteStyleProvider: @escaping (String, VoiceRewriteStyle) -> VoiceRewriteStyle,
+        onWorkflowRewriteStyleChanged: @escaping (String, VoiceRewriteStyle) -> Void,
         onShortcutRecordingStateChanged: @escaping (Bool) -> Void,
         onRequestMicrophonePermission: @escaping () -> Void,
         onRequestAccessibilityPermission: @escaping () -> Void,
@@ -186,7 +229,7 @@ final class VoiceWebSettingsWindowController: NSWindowController, NSWindowDelega
         userContentController.add(scriptHandler, name: "settings")
         configuration.userContentController = userContentController
         self.scriptHandler = scriptHandler
-        self.webView = WKWebView(frame: contentRect, configuration: configuration)
+        self.webView = DraggableSettingsWebView(frame: contentRect, configuration: configuration)
 
         self.selectedTab = selectedTab
         self.shortcut = shortcut
@@ -197,6 +240,8 @@ final class VoiceWebSettingsWindowController: NSWindowController, NSWindowDelega
         self.onShortcutChanged = onShortcutChanged
         self.onOutputLanguageChanged = onOutputLanguageChanged
         self.onRewriteStyleChanged = onRewriteStyleChanged
+        self.workflowRewriteStyleProvider = workflowRewriteStyleProvider
+        self.onWorkflowRewriteStyleChanged = onWorkflowRewriteStyleChanged
         self.onShortcutRecordingStateChanged = onShortcutRecordingStateChanged
         self.onRequestMicrophonePermission = onRequestMicrophonePermission
         self.onRequestAccessibilityPermission = onRequestAccessibilityPermission
@@ -207,6 +252,7 @@ final class VoiceWebSettingsWindowController: NSWindowController, NSWindowDelega
         self.scriptHandler.owner = self
         window.delegate = self
         configureWebView()
+        installTitlebarDragMonitor()
         loadSettingsWeb()
     }
 
@@ -253,6 +299,10 @@ final class VoiceWebSettingsWindowController: NSWindowController, NSWindowDelega
         Swift.print("[SettingsWeb] provisional navigation failed: \(error.localizedDescription)")
     }
 
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        hideLoadingView(delay: 0.15)
+    }
+
     private func configureWebView() {
         webView.translatesAutoresizingMaskIntoConstraints = false
         webView.allowsBackForwardNavigationGestures = false
@@ -262,13 +312,98 @@ final class VoiceWebSettingsWindowController: NSWindowController, NSWindowDelega
         webView.layer?.backgroundColor = Self.windowBackgroundColor.cgColor
         window?.contentView = NSView()
         guard let contentView = window?.contentView else { return }
+        contentView.wantsLayer = true
+        contentView.layer?.backgroundColor = Self.windowBackgroundColor.cgColor
         contentView.addSubview(webView)
+        configureLoadingView(in: contentView, above: webView)
+        let titlebarDragView = TitlebarDragView()
+        titlebarDragView.translatesAutoresizingMaskIntoConstraints = false
+        titlebarDragView.wantsLayer = true
+        titlebarDragView.layer?.backgroundColor = NSColor.clear.cgColor
+        titlebarDragView.layer?.zPosition = 1000
+        contentView.addSubview(titlebarDragView, positioned: .above, relativeTo: webView)
         NSLayoutConstraint.activate([
             webView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             webView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             webView.topAnchor.constraint(equalTo: contentView.topAnchor),
-            webView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
+            webView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            titlebarDragView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 84),
+            titlebarDragView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            titlebarDragView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            titlebarDragView.heightAnchor.constraint(equalToConstant: 60)
         ])
+    }
+
+    private func configureLoadingView(in contentView: NSView, above webView: NSView) {
+        loadingView.translatesAutoresizingMaskIntoConstraints = false
+        loadingView.wantsLayer = true
+        loadingView.layer?.backgroundColor = Self.windowBackgroundColor.cgColor
+        loadingView.layer?.zPosition = 900
+
+        let titleLabel = NSTextField(labelWithString: "NexVoice")
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: 24, weight: .bold)
+        titleLabel.textColor = NSColor(calibratedWhite: 0.92, alpha: 1)
+
+        let messageLabel = NSTextField(labelWithString: "设置加载中...")
+        messageLabel.translatesAutoresizingMaskIntoConstraints = false
+        messageLabel.font = .systemFont(ofSize: 14, weight: .medium)
+        messageLabel.textColor = NSColor(calibratedWhite: 0.72, alpha: 1)
+
+        let progress = NSProgressIndicator()
+        progress.translatesAutoresizingMaskIntoConstraints = false
+        progress.style = .spinning
+        progress.controlSize = .regular
+        progress.startAnimation(nil)
+
+        loadingView.addSubview(titleLabel)
+        loadingView.addSubview(messageLabel)
+        loadingView.addSubview(progress)
+        contentView.addSubview(loadingView, positioned: .above, relativeTo: webView)
+
+        NSLayoutConstraint.activate([
+            loadingView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            loadingView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            loadingView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            loadingView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            titleLabel.centerXAnchor.constraint(equalTo: loadingView.centerXAnchor),
+            titleLabel.centerYAnchor.constraint(equalTo: loadingView.centerYAnchor, constant: -20),
+            messageLabel.centerXAnchor.constraint(equalTo: loadingView.centerXAnchor),
+            messageLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 10),
+            progress.centerXAnchor.constraint(equalTo: loadingView.centerXAnchor),
+            progress.topAnchor.constraint(equalTo: messageLabel.bottomAnchor, constant: 18)
+        ])
+    }
+
+    private func hideLoadingView(delay: TimeInterval = 0) {
+        guard !loadingView.isHidden else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.16
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                self.loadingView.animator().alphaValue = 0
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
+                self?.loadingView.isHidden = true
+            }
+        }
+    }
+
+    private func installTitlebarDragMonitor() {
+        titlebarDragMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
+            guard let self,
+                  let window = self.window,
+                  event.window === window,
+                  self.isTitlebarDragEvent(event, in: window) else {
+                return event
+            }
+            window.performDrag(with: event)
+            return nil
+        }
+    }
+
+    private func isTitlebarDragEvent(_ event: NSEvent, in window: NSWindow) -> Bool {
+        DraggableSettingsWebView.isTitlebarDragPoint(event.locationInWindow, in: window)
     }
 
     private func loadSettingsWeb() {
@@ -320,6 +455,7 @@ final class VoiceWebSettingsWindowController: NSWindowController, NSWindowDelega
         switch type {
         case "ready":
             webViewReady = true
+            hideLoadingView()
             refreshWorkflowIfNeeded()
             sendState()
         case "selectTab":
@@ -351,9 +487,11 @@ final class VoiceWebSettingsWindowController: NSWindowController, NSWindowDelega
             workflowWasManuallySelected = true
             sendState()
         case "setWorkflowMode":
-            guard let rawValue = message["style"] as? String,
+            guard let workflowIdentifier = message["workflow"] as? String,
+                  let rawValue = message["style"] as? String,
                   let style = VoiceRewriteStyle(rawValue: rawValue) else { return }
-            applyRewriteStyle(style)
+            onWorkflowRewriteStyleChanged(workflowIdentifier, style)
+            sendState()
         case "setDictionaryFilter":
             guard let rawValue = message["filter"] as? String,
                   let filter = DictionaryFilter(rawValue: rawValue) else { return }
@@ -541,7 +679,7 @@ final class VoiceWebSettingsWindowController: NSWindowController, NSWindowDelega
             "promptHint": workflow.promptHint,
             "sources": workflow.likelySources,
             "status": workflow == currentWorkflow ? "已识别" : "未命中",
-            "mode": rewriteStyle.rawValue
+            "mode": workflowRewriteStyleProvider(workflow.rawValue, rewriteStyle).rawValue
         ]
     }
 
@@ -664,4 +802,5 @@ final class VoiceWebSettingsWindowController: NSWindowController, NSWindowDelega
     private static var windowBackgroundColor: NSColor {
         NSColor(calibratedRed: 16.0 / 255.0, green: 16.0 / 255.0, blue: 17.0 / 255.0, alpha: 1)
     }
+
 }

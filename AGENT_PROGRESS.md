@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-- 当前工作目录：`/Users/nefish/Desktop/Coding/NexVoice`。
+- 当前工作目录：`/Users/nefish/Desktop/WorkSpace/Coding/NexVoice`。
 - 项目形态：SwiftPM macOS 菜单栏 App，核心模块为 `NexVoiceCore`，宿主为 `NexVoiceHost`。
 - 默认入口：短按右 Alt 开始语音输入，再按一次结束；长按右 Alt 约 0.55 秒进入看屏自动回复；ESC 可取消录音、等待 final、AI 改写或看屏回复中的会话。
 - 当前主链路：腾讯云实时 ASR `16k_zh_en` -> DeepSeek `deepseek-v4-flash` 最终整理 -> 写入当前聚焦输入框。
@@ -24,7 +24,7 @@
   - `权限`：展示麦克风、辅助功能、屏幕录制权限；未授权时可打开系统设置。
 - 已补齐 Web 交互：
   - 左侧 Tab、按钮、分段控件、输出模式卡片、词库条目、弹窗、权限按钮都有 hover / active 反馈。
-  - 品牌蓝统一升级为 `#1CE5FF`，用于版本号、输出模式指标条等关键状态点缀。
+  - 品牌蓝统一升级为 `#126DFF`，用于版本号、输出模式指标条等关键状态点缀。
   - 输出模式选中态不再使用蓝色背景，只保留浅描边；选中卡片内的指标条使用品牌蓝并带展开动画。
   - 工作流页的输出模式选择器已从系统原生下拉框改为自定义菜单，视觉与设置页其他控件一致。
   - 快捷键录制期间按 `ESC` 会取消录制，不会保存为快捷键。
@@ -53,6 +53,33 @@
 - 重要边界：
   - 本轮按 Git 同步要求递增版本：`0.1.8 (9)` -> `0.1.9 (10)`。
   - 当前工作流里的“输出模式”先接到真实全局输出模式；如果要做到“每个工作流单独保存默认输出模式并影响实际改写链路”，还需要新增设置存储和主改写链路读取逻辑。
+
+## 本轮完成（2026-06-24：设置页细节收口与私用 DMG）
+
+- 设置页视觉与交互继续收口：
+  - 左侧导航图标统一切到 `@tabler/icons-react`，输入页改名为 `常规`。
+  - DeepSeek 评测菜单和临时评测功能已从工程中删除。
+  - 设置窗口顶部可拖动，首次打开增加加载占位，减少 WebView 空白等待。
+  - 菜单栏状态菜单按用户实际使用逻辑简化，移除 ASR 展示行，保留输出语言、输出模式、个人词库、权限等直接入口。
+  - 工作流支持单独保存输出模式，新增 `VoiceWorkflowRewriteStyleStore` 和对应测试。
+  - 输出模式页选中模块再次点击会重新播放参数条动画，动画速度调整为更利落。
+  - 个人词库页复用工作流 Tab 和列表结构，修复外层容器 `overflow` 导致的圆角裁切；按钮、Tab、列表、模块圆角 token 收敛为外层 / 内层两级。
+  - 添加词条弹窗输入框只保留单层亮灰焦点描边；工作流输出模式下拉箭头改为通用亮灰。
+  - 工作流输出模式下拉菜单每项增加 2px 间隔，并通过提升所在行层级修复被下方卡片行压住/裁切的问题。
+  - 设置页色彩体系调整为蓝灰中性色为主，品牌色改为 `#126DFF`，仅作为少量强调色使用；窗口外框恢复为较弱的冷色描边。
+- 本轮私用包：
+  - 已手动 bump 版本：`0.1.9 (10)` -> `0.1.10 (11)`，避免提交后版本与 DMG 不一致。
+  - 使用 `./scripts/build_app.sh release --embed-local-keys` 构建，确认本机 DeepSeek / 腾讯云 ASR 配置文件已嵌入 App 资源目录。
+  - 新 DMG：`dist/NexVoice-0.1.10-build11-settings-web-polish-embedded-keys-20260624.dmg`。
+  - 新 DMG SHA256：`8d77054b15851cbbb044a6e7ed4170a10b709263c7a2523dbbf2dc703836562f`。
+- 验证：
+  - `SettingsWeb` `npm run build`：通过。
+  - `./scripts/build_app.sh release --embed-local-keys`：通过。
+  - `hdiutil verify dist/NexVoice-0.1.10-build11-settings-web-polish-embedded-keys-20260624.dmg`：通过。
+  - 已挂载 DMG 验证根目录包含 `NexVoice.app` 和 `Applications` 快捷入口。
+  - 已验证 DMG 内 `NexVoice.app` 签名通过。
+  - 已验证 DMG 内 `DeepSeek.json` 和 `TencentCloudASR.json` 存在且非空，未在文档或 Git 中写入密钥内容。
+  - `git diff --check`：通过。
 
 ## 已完成能力
 

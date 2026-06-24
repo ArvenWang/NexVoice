@@ -13,13 +13,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var shortcutMenuItem: NSMenuItem?
     private var shortcutSettingsMenuItem: NSMenuItem?
-    private var asrMenuItem: NSMenuItem?
+    private var outputLanguageMenuItem: NSMenuItem?
     private var chineseOutputMenuItem: NSMenuItem?
     private var englishOutputMenuItem: NSMenuItem?
     private var outputStyleMenuItem: NSMenuItem?
     private var outputStyleMenuItems: [VoiceRewriteStyle: NSMenuItem] = [:]
     private var personalDictionaryMenuItem: NSMenuItem?
-    private var rewriteEvaluationMenuItem: NSMenuItem?
+    private var microphoneMenuItem: NSMenuItem?
     private var accessibilityMenuItem: NSMenuItem?
     private var inputMonitoringMenuItem: NSMenuItem?
     private var screenRecordingMenuItem: NSMenuItem?
@@ -39,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     )
     private let shortcutStore = VoiceShortcutStore()
+    private let workflowRewriteStyleStore = VoiceWorkflowRewriteStyleStore()
     private let shortcutMonitor = GlobalVoiceShortcutMonitor()
     private var settingsWindowController: VoiceWebSettingsWindowController?
     private var settingsPreviewApplication: NSRunningApplication?
@@ -65,16 +66,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dictionaryLearningResetWorkItem: DispatchWorkItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if shouldRunRewriteEvaluationOnly {
-            NSApp.setActivationPolicy(.accessory)
-            Task {
-                let reportURL = await VoiceRewriteEvaluationRunner.runAndWriteReport()
-                print("NexVoice rewrite evaluation report: \(reportURL.path)")
-                NSApp.terminate(nil)
-            }
-            return
-        }
-
         NSApp.setActivationPolicy(.accessory)
         voiceShortcut = shortcutStore.load()
         selectedOutputLanguage = Self.loadOutputLanguage()
@@ -82,11 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureStatusItem()
         captionPanel.reset()
         startShortcutMonitor()
-    }
-
-    private var shouldRunRewriteEvaluationOnly: Bool {
-        Bundle.main.bundleIdentifier == "com.nexvoice.mac.rewrite-eval-runner"
-            || ProcessInfo.processInfo.arguments.contains("--run-rewrite-eval")
+        prewarmSettingsWindow()
     }
 
     private func configureStatusItem() {
@@ -94,51 +81,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.title = "NexVoice"
 
         let menu = NSMenu()
+        let settingsItem = NSMenuItem(title: "打开设置...", action: #selector(openSettingsMenu), keyEquivalent: "")
         let shortcutItem = NSMenuItem(title: "快捷键：\(voiceShortcut.displayTitle)", action: nil, keyEquivalent: "")
-        let settingsItem = NSMenuItem(title: "设置...", action: #selector(openSettingsMenu), keyEquivalent: "")
+        let outputLanguageItem = NSMenuItem(title: "输出语言：中文", action: nil, keyEquivalent: "")
         let chineseOutputItem = NSMenuItem(title: "输出：中文", action: #selector(selectChineseOutput), keyEquivalent: "")
         let englishOutputItem = NSMenuItem(title: "输出：English", action: #selector(selectEnglishOutput), keyEquivalent: "")
         let outputStyleItem = NSMenuItem(title: "输出模式：\(selectedRewriteStyle.menuTitle)", action: nil, keyEquivalent: "")
         let personalDictionaryItem = NSMenuItem(title: "个人词库...", action: #selector(openPersonalDictionary), keyEquivalent: "")
-        let rewriteEvaluationItem = NSMenuItem(title: "运行 DeepSeek 评测", action: #selector(runRewriteEvaluation), keyEquivalent: "")
+        let microphoneItem = NSMenuItem(title: "申请麦克风权限", action: #selector(requestMicrophonePermission), keyEquivalent: "")
         let accessibilityItem = NSMenuItem(title: VoicePermissionGuidance.accessibility.actionTitle, action: #selector(openAccessibilitySettings), keyEquivalent: "")
         let inputMonitoringItem = NSMenuItem(title: "申请输入监控权限", action: #selector(openInputMonitoringSettings), keyEquivalent: "")
         let screenRecordingItem = NSMenuItem(title: "申请屏幕录制权限", action: #selector(openScreenRecordingSettings), keyEquivalent: "")
-        let localASRItem = NSMenuItem(title: "ASR：腾讯云实时 ASR（中英自动）", action: nil, keyEquivalent: "")
+        let outputLanguageMenu = NSMenu()
+        let permissionsMenu = NSMenu()
         let outputStyleMenu = NSMenu()
+        let permissionsGroupItem = NSMenuItem(title: "权限", action: nil, keyEquivalent: "")
 
         shortcutItem.isEnabled = false
-        localASRItem.isEnabled = false
         configureOutputStyleMenu(outputStyleMenu)
+        outputLanguageItem.submenu = outputLanguageMenu
         outputStyleItem.submenu = outputStyleMenu
+        permissionsGroupItem.submenu = permissionsMenu
 
-        menu.addItem(shortcutItem)
-        menu.addItem(localASRItem)
+        outputLanguageMenu.addItem(chineseOutputItem)
+        outputLanguageMenu.addItem(englishOutputItem)
+
+        permissionsMenu.addItem(microphoneItem)
+        permissionsMenu.addItem(accessibilityItem)
+        permissionsMenu.addItem(inputMonitoringItem)
+        permissionsMenu.addItem(screenRecordingItem)
+
         menu.addItem(settingsItem)
+        menu.addItem(shortcutItem)
         menu.addItem(.separator())
-        menu.addItem(chineseOutputItem)
-        menu.addItem(englishOutputItem)
+        menu.addItem(outputLanguageItem)
         menu.addItem(outputStyleItem)
         menu.addItem(personalDictionaryItem)
-        menu.addItem(.separator())
-        menu.addItem(rewriteEvaluationItem)
-        menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "申请麦克风权限", action: #selector(requestMicrophonePermission), keyEquivalent: ""))
-        menu.addItem(accessibilityItem)
-        menu.addItem(inputMonitoringItem)
-        menu.addItem(screenRecordingItem)
+        menu.addItem(permissionsGroupItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "退出 NexVoice", action: #selector(quit), keyEquivalent: "q"))
-        menu.items.forEach { $0.target = self }
+        assignTargets(in: menu)
 
         shortcutMenuItem = shortcutItem
         shortcutSettingsMenuItem = settingsItem
-        asrMenuItem = localASRItem
+        outputLanguageMenuItem = outputLanguageItem
         chineseOutputMenuItem = chineseOutputItem
         englishOutputMenuItem = englishOutputItem
         outputStyleMenuItem = outputStyleItem
         personalDictionaryMenuItem = personalDictionaryItem
-        rewriteEvaluationMenuItem = rewriteEvaluationItem
+        microphoneMenuItem = microphoneItem
         accessibilityMenuItem = accessibilityItem
         inputMonitoringMenuItem = inputMonitoringItem
         screenRecordingMenuItem = screenRecordingItem
@@ -160,6 +151,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.representedObject = style.rawValue
             outputStyleMenuItems[style] = item
             menu.addItem(item)
+        }
+    }
+
+    private func assignTargets(in menu: NSMenu) {
+        for item in menu.items {
+            if item.action != nil {
+                item.target = self
+            }
+            if let submenu = item.submenu {
+                assignTargets(in: submenu)
+            }
         }
     }
 
@@ -232,13 +234,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         openSettings(tab: .input)
     }
 
+    private func prewarmSettingsWindow() {
+        DispatchQueue.main.async { [weak self] in
+            _ = self?.settingsController(selectedTab: .input)
+        }
+    }
+
     private func openSettings(tab: VoiceWebSettingsWindowController.Tab) {
         if let frontmostApplication = NSWorkspace.shared.frontmostApplication,
            frontmostApplication.bundleIdentifier != Bundle.main.bundleIdentifier {
             settingsPreviewApplication = frontmostApplication
         }
 
-        let controller = settingsWindowController ?? VoiceWebSettingsWindowController(
+        let controller = settingsController(selectedTab: tab)
+        controller.update(
+            shortcut: voiceShortcut,
+            outputLanguage: selectedOutputLanguage,
+            rewriteStyle: selectedRewriteStyle
+        )
+        controller.select(tab: tab)
+        controller.showWindow(nil)
+    }
+
+    private func settingsController(selectedTab tab: VoiceWebSettingsWindowController.Tab) -> VoiceWebSettingsWindowController {
+        if let settingsWindowController {
+            return settingsWindowController
+        }
+
+        let controller = VoiceWebSettingsWindowController(
             selectedTab: tab,
             shortcut: voiceShortcut,
             outputLanguage: selectedOutputLanguage,
@@ -274,6 +297,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.captionPanel.reset()
                 self.refreshMenuState()
             },
+            workflowRewriteStyleProvider: { [weak self] workflowIdentifier, defaultStyle in
+                guard let self else { return defaultStyle }
+                return self.workflowRewriteStyleStore.style(
+                    for: workflowIdentifier,
+                    defaultStyle: defaultStyle
+                )
+            },
+            onWorkflowRewriteStyleChanged: { [weak self] workflowIdentifier, style in
+                guard let self else { return }
+                self.workflowRewriteStyleStore.save(style, for: workflowIdentifier)
+                self.captionPanel.reset()
+                self.refreshMenuState()
+            },
             onShortcutRecordingStateChanged: { [weak self] isRecording in
                 guard let self else { return }
                 self.shortcutMonitor.setSuspended(isRecording)
@@ -290,13 +326,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         )
         settingsWindowController = controller
-        controller.update(
-            shortcut: voiceShortcut,
-            outputLanguage: selectedOutputLanguage,
-            rewriteStyle: selectedRewriteStyle
-        )
-        controller.select(tab: tab)
-        controller.showWindow(nil)
+        return controller
     }
 
     private func settingsPreviewTargetApplication() -> NSRunningApplication? {
@@ -315,25 +345,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openPersonalDictionary() {
         openSettings(tab: .dictionary)
-    }
-
-    @objc private func runRewriteEvaluation() {
-        guard transcriptionService.state == .idle, rewriteTask == nil else { return }
-        rewriteEvaluationMenuItem?.isEnabled = false
-        statusItem?.button?.title = "NexVoice 评测中"
-        captionPanel.showLoading("DeepSeek 评测中")
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            let reportURL = await VoiceRewriteEvaluationRunner.runAndWriteReport()
-            self.captionPanel.showStatus("评测完成", isError: false, autoHideDelay: 1.4)
-            self.statusItem?.button?.title = "NexVoice"
-            self.rewriteEvaluationMenuItem?.isEnabled = true
-            self.showNotification(
-                title: "DeepSeek 评测完成",
-                body: "报告已写入：\(reportURL.path)"
-            )
-            self.refreshMenuState()
-        }
     }
 
     @objc private func openAccessibilitySettings() {
@@ -657,7 +668,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let originalText = text
         let outputLanguage = selectedOutputLanguage
-        let rewriteStyle = selectedRewriteStyle
         let selectedTextContext = selectedTextContextForCurrentSession
         let rewriteContext = rewriteContextForCurrentSession ?? VoiceRewriteContext(
             sourceApplicationName: targetApplicationForCurrentSession?.localizedName,
@@ -665,6 +675,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             selectedTextMode: selectedTextContext?.text.isEmpty == false,
             personalDictionary: VoicePersonalDictionaryStore.load()
         )
+        let rewriteStyle = rewriteStyle(for: rewriteContext)
         let targetApplication = targetApplicationForCurrentSession
         rewriteTask?.cancel()
         rewriteTask = Task { [weak self] in
@@ -800,12 +811,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshMenuState()
 
         let outputLanguage = selectedOutputLanguage
-        let rewriteStyle = selectedRewriteStyle
         let rewriteContext = rewriteContextForCurrentSession ?? VoiceRewriteContext(
             sourceApplicationName: targetApplicationForCurrentSession?.localizedName,
             sourceApplicationBundleIdentifier: targetApplicationForCurrentSession?.bundleIdentifier,
             personalDictionary: VoicePersonalDictionaryStore.load()
         )
+        let rewriteStyle = rewriteStyle(for: rewriteContext)
         let targetApplication = targetApplicationForCurrentSession
 
         rewriteTask?.cancel()
@@ -1040,7 +1051,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refreshMenuState() {
         shortcutMenuItem?.title = "快捷键：\(voiceShortcut.displayTitle)"
-        asrMenuItem?.title = cloudASRMenuTitle()
 
         switch transcriptionService.state {
         case .idle:
@@ -1054,6 +1064,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         chineseOutputMenuItem?.state = selectedOutputLanguage == .simplifiedChinese ? .on : .off
         englishOutputMenuItem?.state = selectedOutputLanguage == .english ? .on : .off
         let canChangeMode = transcriptionService.state == .idle && !isRewritingCurrentSession
+        outputLanguageMenuItem?.title = selectedOutputLanguage == .simplifiedChinese
+            ? "输出语言：中文"
+            : "输出语言：English"
+        outputLanguageMenuItem?.isEnabled = canChangeMode
         chineseOutputMenuItem?.isEnabled = canChangeMode
         englishOutputMenuItem?.isEnabled = canChangeMode
         outputStyleMenuItem?.title = "输出模式：\(selectedRewriteStyle.menuTitle)"
@@ -1062,18 +1076,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.state = style == selectedRewriteStyle ? .on : .off
             item.isEnabled = canChangeMode
         }
-        rewriteEvaluationMenuItem?.isEnabled = transcriptionService.state == .idle && rewriteTask == nil
         personalDictionaryMenuItem?.isEnabled = true
 
-        accessibilityMenuItem?.title = textInserter.canPostKeyboardEvents
+        let microphoneAuthorized = permissionService.authorizationStatus() == .authorized
+        microphoneMenuItem?.title = microphoneAuthorized ? "麦克风权限已允许" : "申请麦克风权限"
+        microphoneMenuItem?.isEnabled = !microphoneAuthorized
+
+        let accessibilityAllowed = textInserter.canPostKeyboardEvents
+        accessibilityMenuItem?.title = accessibilityAllowed
             ? "辅助功能权限已允许"
             : VoicePermissionGuidance.accessibility.actionTitle
-        inputMonitoringMenuItem?.title = SystemPermissionRequester.hasInputMonitoringPermission
+        accessibilityMenuItem?.isEnabled = !accessibilityAllowed
+
+        let inputMonitoringAllowed = SystemPermissionRequester.hasInputMonitoringPermission
+        inputMonitoringMenuItem?.title = inputMonitoringAllowed
             ? "输入监控权限已允许"
             : "申请输入监控权限"
-        screenRecordingMenuItem?.title = SystemPermissionRequester.hasScreenRecordingPermission
+        inputMonitoringMenuItem?.isEnabled = !inputMonitoringAllowed
+
+        let screenRecordingAllowed = SystemPermissionRequester.hasScreenRecordingPermission
+        screenRecordingMenuItem?.title = screenRecordingAllowed
             ? "屏幕录制权限已允许"
             : "申请屏幕录制权限"
+        screenRecordingMenuItem?.isEnabled = !screenRecordingAllowed
         if activeDictionaryLearningTasks > 0, transcriptionService.state == .idle, !isRewritingCurrentSession {
             statusItem?.button?.title = "NexVoice 学习中"
         }
@@ -1117,16 +1142,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    private func cloudASRMenuTitle() -> String {
-        do {
-            let credentials = try TencentCloudASRCredentialStore.load()
-            if credentials.isComplete {
-                return "ASR：腾讯云实时 ASR（中英自动）"
-            }
-            return "ASR：腾讯云实时 ASR（缺少 \(credentials.missingFieldNames.joined(separator: "、"))）"
-        } catch {
-            return "ASR：腾讯云实时 ASR（配置读取失败）"
-        }
+    private func rewriteStyle(for context: VoiceRewriteContext) -> VoiceRewriteStyle {
+        workflowRewriteStyleStore.style(
+            for: context.applicationWorkflow.identifier,
+            defaultStyle: selectedRewriteStyle
+        )
     }
 
     private static func loadOutputLanguage() -> VoiceOutputLanguage {

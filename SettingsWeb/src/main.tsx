@@ -1,5 +1,13 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
+import {
+  IconAdjustments,
+  IconBook,
+  IconChevronDown,
+  IconSettings,
+  IconRoute,
+  IconShieldLock
+} from "@tabler/icons-react";
 import { demoState, postToNative } from "./bridge";
 import type {
   DictionaryFilter,
@@ -12,12 +20,19 @@ import type {
 } from "./types";
 import "./styles.css";
 
-const navItems: Array<{ id: SettingsTab; title: string; icon: string }> = [
-  { id: "input", title: "输入", icon: "⌘" },
-  { id: "modes", title: "输出模式", icon: "✦" },
-  { id: "workflow", title: "工作流", icon: "◇" },
-  { id: "dictionary", title: "词库", icon: "▦" },
-  { id: "permissions", title: "权限", icon: "●" }
+type TablerIcon = React.ComponentType<{
+  size?: number;
+  stroke?: number;
+  className?: string;
+  "aria-hidden"?: boolean;
+}>;
+
+const navItems: Array<{ id: SettingsTab; title: string; Icon: TablerIcon }> = [
+  { id: "input", title: "常规", Icon: IconSettings },
+  { id: "modes", title: "输出模式", Icon: IconAdjustments },
+  { id: "workflow", title: "工作流", Icon: IconRoute },
+  { id: "dictionary", title: "词库", Icon: IconBook },
+  { id: "permissions", title: "权限", Icon: IconShieldLock }
 ];
 
 const styleTitles: Record<RewriteStyle, string> = {
@@ -80,7 +95,7 @@ function App() {
               className={`nav-item ${state.selectedTab === item.id ? "active" : ""}`}
               onClick={() => selectTab(item.id)}
             >
-              <span className="nav-icon">{item.icon}</span>
+              <item.Icon className="nav-icon" size={16} stroke={2} aria-hidden />
               <span>{item.title}</span>
             </button>
           ))}
@@ -126,7 +141,7 @@ function App() {
 function InputPage({ state }: { state: SettingsState }) {
   return (
     <div className="page">
-      <h1>输入设置</h1>
+      <h1>常规</h1>
       <section className="card">
         <div className="card-row interactive-row">
           <div>
@@ -179,6 +194,19 @@ function InputPage({ state }: { state: SettingsState }) {
 }
 
 function ModesPage({ state }: { state: SettingsState }) {
+  const [metricAnimationKey, setMetricAnimationKey] = useState(0);
+
+  useEffect(() => {
+    setMetricAnimationKey((key) => key + 1);
+  }, [state.rewriteStyle]);
+
+  const selectRewriteStyle = (style: RewriteStyle) => {
+    if (style === state.rewriteStyle) {
+      setMetricAnimationKey((key) => key + 1);
+    }
+    postToNative({ type: "setRewriteStyle", style });
+  };
+
   return (
     <div className="page">
       <h1>输出模式</h1>
@@ -190,7 +218,7 @@ function ModesPage({ state }: { state: SettingsState }) {
               key={mode.id}
               type="button"
               className={`mode-card ${active ? "active" : ""}`}
-              onClick={() => postToNative({ type: "setRewriteStyle", style: mode.id })}
+              onClick={() => selectRewriteStyle(mode.id)}
             >
               <h2>{mode.title}</h2>
               <p>{mode.description}</p>
@@ -199,7 +227,10 @@ function ModesPage({ state }: { state: SettingsState }) {
                   <div className="metric" key={metric.label}>
                     <span>{metric.label}</span>
                     <i>
-                      <b style={{ width: active ? `${metric.value}%` : `${metric.value}%` }} />
+                      <b
+                        key={`${active ? metricAnimationKey : "idle"}-${metric.label}`}
+                        style={{ width: `${metric.value}%` }}
+                      />
                     </i>
                     <strong>{metric.value}</strong>
                   </div>
@@ -232,7 +263,7 @@ function WorkflowPage({ state, workflow }: { state: SettingsState; workflow: Wor
           </button>
         ))}
       </div>
-      <section className="card">
+      <section className={`card workflow-card ${isModeMenuOpen ? "menu-open" : ""}`}>
         <div className="card-row interactive-row">
           <div>
             <h2>当前应用</h2>
@@ -247,7 +278,7 @@ function WorkflowPage({ state, workflow }: { state: SettingsState; workflow: Wor
           </div>
           <strong className="value-text">{workflow.title}</strong>
         </div>
-        <div className="card-row interactive-row">
+        <div className="card-row interactive-row select-row">
           <div>
             <h2>输出模式</h2>
             <p>可为当前工作流指定默认改写风格。</p>
@@ -259,7 +290,7 @@ function WorkflowPage({ state, workflow }: { state: SettingsState; workflow: Wor
               onClick={() => setIsModeMenuOpen((open) => !open)}
             >
               <span>{selectedModeTitle}</span>
-              <i />
+              <IconChevronDown className="select-icon" size={16} stroke={2.2} aria-hidden />
             </button>
             {isModeMenuOpen && (
               <div className="select-menu" role="listbox">
@@ -306,7 +337,7 @@ function DictionaryPage({
       <h1>个人词库</h1>
       <section className="dictionary-panel">
         <div className="dictionary-controls">
-          <div className="segmented full-tabs dictionary-tabs">
+          <div className="segmented full-tabs workflow-tabs">
             {(["all", "automatic", "manual"] as DictionaryFilter[]).map((filter) => (
               <button
                 key={filter}
@@ -318,16 +349,16 @@ function DictionaryPage({
               </button>
             ))}
           </div>
-          <button className="btn primary add-term-button" type="button" onClick={onShowAddTerm}>
+          <button className="btn primary compact" type="button" onClick={onShowAddTerm}>
             添加词条
           </button>
         </div>
-        <div className="dictionary-list">
-          {terms.length === 0 ? (
-            <div className="empty">暂无词条</div>
-          ) : (
-            terms.map((term) => (
-              <div className="dictionary-entry" key={`${term.source}-${term.phrase}`}>
+        {terms.length === 0 ? (
+          <div className="empty">暂无词条</div>
+        ) : (
+          <section className="card dictionary-list-card">
+            {terms.map((term) => (
+              <div className="card-row interactive-row dictionary-row" key={`${term.source}-${term.phrase}`}>
                 <strong>{term.phrase}</strong>
                 <span>权重 <b>{term.weight}</b></span>
                 <span>场景 <b>{term.scene}</b></span>
@@ -339,9 +370,9 @@ function DictionaryPage({
                   删除
                 </button>
               </div>
-            ))
-          )}
-        </div>
+            ))}
+          </section>
+        )}
       </section>
     </div>
   );

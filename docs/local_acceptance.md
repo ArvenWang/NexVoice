@@ -79,7 +79,7 @@ dist/NexVoice.app
 
 - 未授权时，按快捷键会先引导授权，不会静默失败。
 - 按一下快捷键后菜单栏标题会从 `NexVoice` 变为听写/转写状态；再次按下后结束并生成文本。按住快捷键会进入看屏回复，抓屏和语音指令录制应同时进行；松开快捷键后结束指令录制并生成回复。
-- 菜单应显示 `ASR：腾讯云实时 ASR（中英自动）`；不再提供“语言：中文 / English”这种输入语言选择。
+- 菜单不再显示 ASR 状态行；输出语言通过状态栏菜单里的 `输出语言` 子菜单切换。
 - `输出：中文` 会让最终文本以中文为主，但允许保留英文术语、代码、品牌名和自然的中英混合表达；`输出：English` 会让最终文本整理为英文。
 - 菜单应提供 `输出模式` 二级菜单；当前四个模式为 `标准模式（默认）`、`社交达人`、`强化嘴替`、`冷静模式`。
 - 输出语言和输出模式应相互独立：`输出：中文` 或 `输出：English` 只决定最终语言；`输出模式` 同时决定改写幅度和表达调性。默认 `标准模式` 必须修正吞字、断词、口头禅、错词和断句，同时严格贴合原意、事实、立场和语气强弱。
@@ -98,7 +98,7 @@ dist/NexVoice.app
 - 录音过程中会按约 200ms PCM 音频块实时上传到腾讯云实时 ASR。
 - 腾讯云实时 ASR 固定使用 `16k_zh_en`，由 ASR 自动识别中文、英文或中英混合输入。
 - 腾讯云配置文件位于 `~/Library/Application Support/NexVoice/TencentCloudASR.json`，文件权限应为 `600`。
-- 如果菜单显示 `ASR：腾讯云实时 ASR（缺少 SecretKey）`，说明还没有完成云端配置，按快捷键会失败但不会崩溃。
+- 如果还没有完成腾讯云配置，按快捷键会失败但不会崩溃；具体错误会显示在录音浮层和诊断日志里。
 - DeepSeek 配置文件位于 `~/Library/Application Support/NexVoice/DeepSeek.json`，文件权限应为 `600`。
 - 如果完全没有识别到文字，底部浮层会显示短暂的“未识别到语音”轻提示，然后自动收起；这不应弹出腾讯云错误提示，也不应进入吓人的错误态。
 - 如果用户口述内容里包含多个要求、步骤、问题、原因或结论，DeepSeek 应把杂乱口语整理成通顺、有逻辑的文本，并在合适时使用 `1. 2. 3.` 编号或分段；短句不应被强行扩写成复杂格式。
@@ -111,8 +111,6 @@ dist/NexVoice.app
 - DeepSeek 诊断日志位于 `~/Library/Application Support/NexVoice/Logs/DeepSeekRewrite.jsonl`。如果出现“没有润色/没有结构化/直接回退原文”，应先检查该日志中的 `event`、`operation`、`latencyMs`、`httpStatus`、`finishReason`、`errorMessage`、`promptPreview` 和 `outputPreview`。
 - 看屏回复的 OCR 原文不会完整写入 DeepSeek 诊断日志；`screen_reply` 日志只记录 prompt 字符数和状态，避免把屏幕可见内容长期留在本地日志里。
 - 腾讯云 ASR 诊断日志位于 `~/Library/Application Support/NexVoice/Logs/TencentCloudASR.jsonl`。如果出现实时文字慢、没有 final、误报未识别到语音，应先检查该日志中的 `started`、`first_partial`、`finish_requested`、`final`、`no_speech` 和 `failed` 事件。
-- 可用 `.build/debug/NexVoiceRewriteEval --dry-run --include-prompt` 跳过 ASR 检查 DeepSeek prompt 是否带上下文；网络可用时运行 `.build/debug/NexVoiceRewriteEval` 批量收集真实 DeepSeek 输出样本。
-- 如果命令行环境无法连接 DeepSeek，可以在新版 NexVoice 菜单中点击 `运行 DeepSeek 评测`，让 App 自己的进程直接跑真实样本；报告会写入 `~/Library/Application Support/NexVoice/EvalReports`。
 - 系统剪贴板会被临时用于粘贴最终文本；如果粘贴期间用户没有改动剪贴板，NexVoice 会自动恢复原剪贴板内容。
 - 如果腾讯云鉴权、连接、发送或识别确实失败，会在同一底部浮层里显示统一的“转写失败”错误态；权限申请等非语音流程仍可使用系统提示。
 

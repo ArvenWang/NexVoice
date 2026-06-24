@@ -6,8 +6,6 @@ PLIST_BUDDY="/usr/libexec/PlistBuddy"
 
 VERSION_PLISTS=(
   "Resources/NexVoiceHost/Info.plist"
-  "Resources/NexVoiceRewriteEval/Info.plist"
-  "Resources/NexVoiceRewriteEvalRunner/Info.plist"
 )
 
 if [[ "${NEXVOICE_SKIP_VERSION_BUMP:-0}" == "1" ]]; then
