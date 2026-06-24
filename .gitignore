@@ -9,3 +9,5 @@ dist/
 .env.local
 .release.local.env
 *.log
+SettingsWeb/node_modules/
+SettingsWeb/dist/

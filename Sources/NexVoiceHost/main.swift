@@ -40,7 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     )
     private let shortcutStore = VoiceShortcutStore()
     private let shortcutMonitor = GlobalVoiceShortcutMonitor()
-    private var settingsWindowController: VoiceSettingsWindowController?
+    private var settingsWindowController: VoiceWebSettingsWindowController?
     private var settingsPreviewApplication: NSRunningApplication?
     private var selectedOutputLanguage = VoiceOutputLanguage.simplifiedChinese
     private var selectedRewriteStyle = VoiceRewriteStyle.default
@@ -232,13 +232,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         openSettings(tab: .input)
     }
 
-    private func openSettings(tab: VoiceSettingsWindowController.Tab) {
+    private func openSettings(tab: VoiceWebSettingsWindowController.Tab) {
         if let frontmostApplication = NSWorkspace.shared.frontmostApplication,
            frontmostApplication.bundleIdentifier != Bundle.main.bundleIdentifier {
             settingsPreviewApplication = frontmostApplication
         }
 
-        let controller = settingsWindowController ?? VoiceSettingsWindowController(
+        let controller = settingsWindowController ?? VoiceWebSettingsWindowController(
             selectedTab: tab,
             shortcut: voiceShortcut,
             outputLanguage: selectedOutputLanguage,

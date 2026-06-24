@@ -28,8 +28,20 @@ EMBEDDED_CONFIG_DIR="$RESOURCES_DIR/NexVoiceEmbeddedConfig"
 INFO_PLIST="$ROOT_DIR/Resources/NexVoiceHost/Info.plist"
 SIGN_IDENTITY="${NEXVOICE_CODESIGN_IDENTITY:-}"
 APP_SUPPORT_DIR="$HOME/Library/Application Support/NexVoice"
+SETTINGS_WEB_DIR="$ROOT_DIR/SettingsWeb"
+SETTINGS_WEB_DIST_DIR="$SETTINGS_WEB_DIR/dist"
 
 cd "$ROOT_DIR"
+if [[ -f "$SETTINGS_WEB_DIR/package.json" ]]; then
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "npm is required to build SettingsWeb." >&2
+    exit 1
+  fi
+  if [[ ! -d "$SETTINGS_WEB_DIR/node_modules" ]]; then
+    (cd "$SETTINGS_WEB_DIR" && npm install)
+  fi
+  (cd "$SETTINGS_WEB_DIR" && npm run build)
+fi
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-/private/tmp/nexvoice-clang-cache}"
 swift build --disable-sandbox -c "$CONFIGURATION" --product "$PRODUCT_NAME"
 BUILD_BIN_DIR="$(swift build --disable-sandbox -c "$CONFIGURATION" --show-bin-path)"
@@ -48,6 +60,10 @@ printf "APPL????" > "$CONTENTS_DIR/PkgInfo"
 if [[ -f "$ROOT_DIR/Resources/NexVoiceHost/SenseVoiceTranscriber.py" ]]; then
   cp "$ROOT_DIR/Resources/NexVoiceHost/SenseVoiceTranscriber.py" "$RESOURCES_DIR/SenseVoiceTranscriber.py"
   chmod 755 "$RESOURCES_DIR/SenseVoiceTranscriber.py"
+fi
+if [[ -d "$SETTINGS_WEB_DIST_DIR" ]]; then
+  mkdir -p "$RESOURCES_DIR/SettingsWeb"
+  cp -R "$SETTINGS_WEB_DIST_DIR"/. "$RESOURCES_DIR/SettingsWeb/"
 fi
 if [[ "$EMBED_LOCAL_KEYS" == "1" || "$EMBED_LOCAL_KEYS" == "true" ]]; then
   mkdir -p "$EMBEDDED_CONFIG_DIR"

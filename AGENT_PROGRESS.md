@@ -12,34 +12,47 @@
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
-## 本轮完成（2026-06-24：统一设置窗口与交互修复）
+## 本轮完成（2026-06-24：设置窗口 Web 化迁移）
 
-- 新增统一设置窗口 `VoiceSettingsWindowController`，菜单 `设置...` 打开完整设置窗口，菜单 `个人词库...` 直接进入词库页。
-- 设置窗口包含：
+- 采用新的设置窗口路线：视觉层改为 `SettingsWeb`（React + Vite 静态页），宿主 App 通过 `WKWebView` 加载本地资源；Swift 只负责真实数据、系统权限、快捷键、词库写入和菜单入口。
+- 新增 `Sources/NexVoiceHost/VoiceWebSettingsWindowController.swift`，并把菜单 `设置...` / `个人词库...` 入口切到新的 Web 设置窗口；旧 Swift 设置窗口、旧快捷键窗口、旧个人词库窗口已删除，避免两套设置实现并存。
+- `SettingsWeb` 已包含 5 个真实设置页：
   - `输入设置`：快捷键显示、录制、恢复、输出语言切换。
   - `输出模式`：四种输出模式卡片，点击后写回真实 `VoiceRewriteStyle`。
-  - `工作流`：可查看不同写作场景，并通过下拉框切换当前全局输出模式。
-  - `个人词库`：读取真实个人词库，按全部 / 自动学习 / 手动添加筛选；新增词条会写入 `PersonalDictionary.json`。
-  - `权限`：展示麦克风、辅助功能、屏幕录制状态；已允许时隐藏打开按钮。
-- 设置窗口交互补齐：
-  - 普通按钮、分段 Tab、输出模式卡片、工作流输出模式下拉框都有 hover / pressed 反馈。
-  - 左侧导航补齐内边距和 hover，避免文字贴边。
-  - 快捷键录制状态使用中性亮框，不再使用蓝色描边。
-  - 快捷键录制时按 `ESC` 会取消录制，不会保存为快捷键。
-  - 输出模式选中框改为与快捷键输入框一致的中性亮框，三条指标保留品牌蓝进度条和选中动画。
-  - 词库筛选、弹窗按钮等点击命中改为按最小可交互区域优先处理，避免点 A 亮 B。
-  - 新增词库弹窗输入框占位文字垂直居中，`取消` 可关闭浮层。
-- 合并远端最新快捷键修复：
-  - 保留远端新增的全局 keyboard event tap fallback、输入监控权限入口和外设裸按键触发修复。
-  - 新设置窗口录制快捷键期间通过 `shortcutMonitor.setSuspended` 暂停全局监听，避免录制和全局触发互相抢事件。
+  - `工作流`：展示当前应用、识别场景、工作流规则；输出模式下拉目前会切换真实全局输出模式。
+  - `个人词库`：读取真实个人词库，按全部 / 自动学习 / 手动添加筛选；支持添加、删除真实词条。
+  - `权限`：展示麦克风、辅助功能、屏幕录制权限；未授权时可打开系统设置。
+- 已补齐 Web 交互：
+  - 左侧 Tab、按钮、分段控件、输出模式卡片、词库条目、弹窗、权限按钮都有 hover / active 反馈。
+  - 品牌蓝统一升级为 `#1CE5FF`，用于版本号、输出模式指标条等关键状态点缀。
+  - 输出模式选中态不再使用蓝色背景，只保留浅描边；选中卡片内的指标条使用品牌蓝并带展开动画。
+  - 工作流页的输出模式选择器已从系统原生下拉框改为自定义菜单，视觉与设置页其他控件一致。
+  - 快捷键录制期间按 `ESC` 会取消录制，不会保存为快捷键。
+  - 词库 Tab 与 `添加词条` 按钮保持同一行；添加词条后弹窗会立即关闭并切到手动添加列表。
+  - 词库添加弹窗支持 `Enter` 添加、`Esc` 取消，输入框占位文字垂直居中。
+- 窗口外观：
+  - 设置窗口启用透明标题栏和 full-size content view，隐藏顶部标题条，Web 页面整体上移，不再留下旧标题栏造成的大块顶部空白。
+- 打包流程更新：
+  - `scripts/build_app.sh` 会先构建 `SettingsWeb`，再把 `SettingsWeb/dist` 复制到 `NexVoice.app/Contents/Resources/SettingsWeb`。
+  - `.gitignore` 已忽略 `SettingsWeb/node_modules/` 和 `SettingsWeb/dist/`。
+- 空白页补充修复：
+  - 用户实测发现新版设置窗口打开后为空白，AppShot 显示已加载 `NexVoice.app/Contents/Resources/SettingsWeb/index.html`，但页面没有渲染。
+  - 根因定位：Vite 默认产物通过 `type="module"` 外链 JS/CSS；在 App 内 `file:// + WKWebView` 场景下容易静默失败。第一次内联时还踩到 `String.replace` 会把 JS 中的 `$&` 当成替换占位符，导致原始 `<script type="module"...>` 被重新插进内联脚本，破坏 HTML。
+  - 修复：新增 `SettingsWeb/scripts/inline-assets.mjs`，构建后把 CSS/JS 安全内联进 `index.html`，并使用函数式替换避免 `$` 被误解释；同时转义 `</script>` / `</style>`。
+  - 修复：内联 JS 会移动到 `</body>` 前执行，确保 React 启动时 `<div id="root">` 已存在；CSS 仍保留在 `<head>`，避免首屏无样式闪烁。
+  - 修复：`VoiceWebSettingsWindowController` 注入前端错误上报脚本，Web 设置页如果再发生脚本错误，会在宿主日志中打印 `[SettingsWeb] ...`，不再只显示空白。
 - 验证：
-  - `swift build`：通过。
-  - `git diff --check`：通过。
+  - `npm install`：通过，无漏洞提示。
+  - `npm run build`：通过。
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp`：通过。
+  - `swift test --disable-sandbox --quiet`：通过，138 个测试通过。
   - `./scripts/build_app.sh release`：通过，已生成 `dist/NexVoice.app`。
   - `codesign --verify --deep --strict --verbose=2 dist/NexVoice.app`：通过。
-  - `plutil -lint dist/NexVoice.app/Contents/Info.plist`：通过。
+  - 已确认 App 包内存在 `Contents/Resources/SettingsWeb/index.html`，且最终 HTML 没有 `type="module"` 外链和 `./assets/` 外链标签；CSS 位于 `<body>` 之前，JS 位于 `root` 节点之后、`</body>` 之前，包内 HTML 含 `#1CE5FF` 与 `0.1.9 (10)`。
+  - 通过本地静态服务器打开 `SettingsWeb/dist/index.html`，冒烟测试通过：输出模式切换、工作流自定义下拉、词库筛选、词库弹窗、新增词条、筛选状态均正常。
 - 重要边界：
-  - 当前仍是“全局输出模式”；如果以后要做“每个工作流单独指定默认输出模式”，需要新增设置存储和改写调用链，不应只做 UI。
+  - 本轮按 Git 同步要求递增版本：`0.1.8 (9)` -> `0.1.9 (10)`。
+  - 当前工作流里的“输出模式”先接到真实全局输出模式；如果要做到“每个工作流单独保存默认输出模式并影响实际改写链路”，还需要新增设置存储和主改写链路读取逻辑。
 
 ## 已完成能力
 
