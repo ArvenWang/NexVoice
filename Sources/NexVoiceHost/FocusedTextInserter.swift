@@ -300,7 +300,7 @@ final class FocusedTextInserter {
             return false
         }
 
-        repairInsertionPointToEndOnce(of: element, text: text)
+        repairInsertionPointToEndForTypedInsertion(of: element, text: text)
         return true
     }
 
@@ -669,6 +669,15 @@ final class FocusedTextInserter {
         }
     }
 
+    private static func repairInsertionPointToEndForTypedInsertion(of element: AXUIElement, text: String) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            setInsertionPointToEnd(of: element, text: text)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+            setInsertionPointToEnd(of: element, text: text)
+        }
+    }
+
     @discardableResult
     private static func setInsertionPointToEnd(of element: AXUIElement, text: String) -> Bool {
         guard isAttributeSettable(kAXSelectedTextRangeAttribute as String, on: element) else {
@@ -710,12 +719,12 @@ final class FocusedTextInserter {
             }
             keyDown.post(tap: .cghidEventTap)
             keyUp.post(tap: .cghidEventTap)
-            Thread.sleep(forTimeInterval: 0.001)
+            Thread.sleep(forTimeInterval: 0.02)
         }
         return true
     }
 
-    private static func unicodeInputChunks(from text: String, maxUTF16Units: Int = 64) -> [String] {
+    private static func unicodeInputChunks(from text: String, maxUTF16Units: Int = 512) -> [String] {
         var chunks: [String] = []
         var current = ""
         var currentLength = 0

@@ -13,6 +13,34 @@
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
+## 本轮追加（2026-06-26：修复 Codex 多行输入乱序与光标偏前）
+
+- 用户复测反馈：
+  - 换行已成功保留。
+  - 第二次/第三次连续输入后，光标会落在末尾前几个字的位置。
+  - 尾部会出现类似“别是否”的莫名其妙文字。
+- 日志定位：
+  - `DeepSeekRewrite.jsonl` 中模型输出是正确的，例如第三项为“你要看一下语音识别是否有免费的解决方案。”
+  - `ContinuousRewrite.jsonl` 显示写入走 `actualInsertionMethod=axClearThenUnicodeTyping`，且 `insertedTextCharacters=73`，但 `readbackMatchesInsertedText=false`。
+  - 根因判断：上一版 Unicode 输入按 64 个 UTF-16 单元分块；超过 64 的文本被拆成两段，Codex/Electron 异步处理第二段时可能把后半段插入到错误光标位置，所以看起来像尾部多出几个字。
+- 修复：
+  - 将 Unicode 输入分块上限从 64 提高到 512，让常见 100-200 字以内的连续改写一次性输入，避免分块乱序。
+  - 分块之间的等待从 1ms 提高到 20ms，降低极长文本跨块时的异步错位风险。
+  - `axClearThenUnicodeTyping` 路径的光标修复改为输入完成后 80ms / 220ms 再设置到文末，不再刚发完事件就立即抢修光标。
+- 版本递增：`0.1.34 (35)` -> `0.1.35 (36)`。
+- 当前测试版已构建并启动：
+  - 运行路径：`/Users/nefish/Desktop/Coding/NexVoice/dist/NexVoice.app`
+  - 运行 PID：`14965`
+  - CDHash 前缀：`e2043d01b4d9c6d039e87911f3770b6ba0cc0db5`
+  - 签名时间：`2026-06-26 02:17:40`
+- 验证：
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 通过。
+  - `swift test --disable-sandbox --quiet` 通过，145 个测试。
+  - `git diff --check` 通过。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=2 dist/NexVoice.app` 通过。
+  - 已确认包内版本为 `0.1.35 (36)`，`NexVoiceEmbeddedConfig/DeepSeek.json` 和 `TencentCloudASR.json` 存在。
+
 ## 本轮追加（2026-06-26：Codex 多行连续改写写入修复与语音增强方案）
 
 - 换行问题判断：
