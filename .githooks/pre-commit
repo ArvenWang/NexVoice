@@ -11,8 +11,6 @@ cd "$ROOT_DIR"
 
 VERSION_FILES=(
   "Resources/NexVoiceHost/Info.plist"
-  "Resources/NexVoiceRewriteEval/Info.plist"
-  "Resources/NexVoiceRewriteEvalRunner/Info.plist"
 )
 
 is_version_file() {

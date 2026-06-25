@@ -13,6 +13,36 @@
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
+## 本轮追加（2026-06-26：收紧输入模式与划词模式边界）
+
+- 用户复测反馈：
+  - 可编辑输入框内选中文字后语音，仍会误触发“划词问答”。
+  - Codex 连续输入时仍未看到分段结构化。
+  - 用户明确要求从根本解决，不要继续堆 Codex 专项补丁；因为前几轮修改前曾经可用。
+- 日志定位：
+  - DeepSeek 没有失效：`DeepSeekRewrite.jsonl` 中最近几次 `final_rewrite` 都是 `succeeded`。
+  - 连续结构化未触发的直接原因是 `ContinuousRewrite.jsonl` 显示 `focusedDraftCharacters=0`，也就是录音开始时没有读到 Codex 输入框已有草稿。
+  - 误触发问答的直接证据是日志中出现 `operation=selected_text_command`；这来自此前用 `Command+C` 盲复制来判断页面是否有选中文本。
+  - AX 调试显示 Codex 当前会把一些普通 `AXGroup` 容器暴露为可写 `AXValue`，继续把“可写 AXValue”当输入框会造成误判。
+- 本轮修复：
+  - `selectedTextContext(...)` 不再通过 `Command+C` / 剪贴板盲探测选中文本，只读取无障碍树里明确暴露的“非可编辑选区”。
+  - `isEditableTextElement(...)` 收紧判断：不再把任意 `AXValue` 可写元素当输入框，避免 Codex 普通容器被误认为输入框。
+  - 移除 Codex 文案 `"要求后续变更"` 的逐字硬编码过滤，改为通用过滤：如果读到的文本等于元素自身的 placeholder / title / description / help，就不当作用户草稿。
+- 当前取舍：
+  - 这轮优先解决严重误触发：输入框内选中文字不应进入问答模式。
+  - 如果 Codex 仍然不暴露已有草稿，连续结构化仍可能无法触发；下一步需要单独评估“无全选、无粘贴、无盲复制”的草稿读取/替换方案，不能继续靠专项字符串或复制探测补丁。
+- 版本递增：`0.1.36 (37)` -> `0.1.38 (39)`。
+- 当前测试版已构建并启动：
+  - 运行路径：`/Users/nefish/Desktop/Coding/NexVoice/dist/NexVoice.app`
+  - 运行 PID：`61674`
+  - 包内版本：`0.1.38 (39)`
+- 验证：
+  - `swift test` 通过，145 个测试。
+  - `git diff --check` 通过。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过。
+  - 修复 `.githooks/pre-commit` 里的陈旧 plist 路径，并重新安装本地 hook；后续提交会调用统一 `scripts/bump_version.sh`。
+
 ## 本轮追加（2026-06-26：可编辑选区替换与连续草稿读取兜底）
 
 - 用户复测反馈：

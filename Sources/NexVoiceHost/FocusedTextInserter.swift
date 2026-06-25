@@ -115,28 +115,10 @@ final class FocusedTextInserter {
     }
 
     func selectedTextContext(in targetApplication: NSRunningApplication?) async -> SelectedTextContext? {
-        guard canPostKeyboardEvents else { return nil }
         guard !Self.hasFocusedEditableElement(in: targetApplication) else { return nil }
         guard !Self.hasEditableSelectedText(in: targetApplication) else { return nil }
 
-        restoreWorkItem?.cancel()
-        let activationAnchorRect = CGRect(origin: NSEvent.mouseLocation, size: .zero)
-        let snapshot = PasteboardSnapshot(pasteboard: pasteboard)
-        pasteboard.clearContents()
-        let baselineChangeCount = pasteboard.changeCount
-
-        targetApplication?.activate(options: [.activateIgnoringOtherApps])
-        try? await Task.sleep(nanoseconds: 80_000_000)
-        Self.postCommandC()
-        try? await Task.sleep(nanoseconds: 180_000_000)
-
-        let selectedText = pasteboard.changeCount != baselineChangeCount
-            ? pasteboard.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            : nil
-        snapshot.restore(to: pasteboard)
-
-        guard let selectedText, !selectedText.isEmpty else { return nil }
-        return SelectedTextContext(text: selectedText, anchorRect: activationAnchorRect)
+        return Self.nonEditableSelectedTextContext(in: targetApplication)
     }
 
     func rewriteContext(
@@ -250,6 +232,68 @@ final class FocusedTextInserter {
         }
 
         return elementAndParents(from: focusedElement, maxDepth: 4).contains(where: isEditableTextElement)
+    }
+
+    private static func nonEditableSelectedTextContext(
+        in targetApplication: NSRunningApplication?
+    ) -> SelectedTextContext? {
+        let roots = selectionSearchRoots(in: targetApplication)
+        var visited = 0
+        for root in roots {
+            if let context = nonEditableSelectedTextContext(
+                from: root,
+                visited: &visited,
+                maxNodes: 700
+            ) {
+                return context
+            }
+        }
+        return nil
+    }
+
+    private static func nonEditableSelectedTextContext(
+        from element: AXUIElement,
+        visited: inout Int,
+        maxNodes: Int
+    ) -> SelectedTextContext? {
+        guard visited < maxNodes else { return nil }
+        visited += 1
+
+        if !isEditableTextElement(element),
+           let selectedText = selectedText(on: element),
+           !selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let anchorRect = frameAttribute(on: element)
+                ?? CGRect(origin: NSEvent.mouseLocation, size: .zero)
+            return SelectedTextContext(
+                text: selectedText.trimmingCharacters(in: .whitespacesAndNewlines),
+                anchorRect: anchorRect
+            )
+        }
+
+        for child in elementArrayAttribute(kAXChildrenAttribute as String, on: element) {
+            if let context = nonEditableSelectedTextContext(
+                from: child,
+                visited: &visited,
+                maxNodes: maxNodes
+            ) {
+                return context
+            }
+        }
+        return nil
+    }
+
+    private static func selectionSearchRoots(in targetApplication: NSRunningApplication?) -> [AXUIElement] {
+        var roots: [AXUIElement] = []
+        if let focusedElement = focusedElement(in: targetApplication) ?? systemFocusedElement() {
+            roots.append(contentsOf: elementAndParents(from: focusedElement, maxDepth: 4))
+        }
+        guard let processIdentifier = targetApplication?.processIdentifier else { return roots }
+        let applicationElement = AXUIElementCreateApplication(processIdentifier)
+        if let focusedWindow = elementAttribute(kAXFocusedWindowAttribute as String, on: applicationElement) {
+            roots.append(focusedWindow)
+        }
+        roots.append(contentsOf: elementArrayAttribute(kAXWindowsAttribute as String, on: applicationElement))
+        return roots
     }
 
     private static func focusedElement(in targetApplication: NSRunningApplication?) -> AXUIElement? {
@@ -465,6 +509,36 @@ final class FocusedTextInserter {
         return ranges.compactMap { range(from: $0) }.map(\.length).reduce(0, +)
     }
 
+    private static func selectedText(on element: AXUIElement) -> String? {
+        if let selectedText = stringAttribute(kAXSelectedTextAttribute as String, on: element),
+           !selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return selectedText
+        }
+
+        if let range = rangeAttribute(kAXSelectedTextRangeAttribute as String, on: element),
+           range.length > 0,
+           let text = stringForRange(range, on: element),
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return text
+        }
+
+        var rangesObject: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            element,
+            kAXSelectedTextRangesAttribute as CFString,
+            &rangesObject
+        ) == .success,
+              let ranges = rangesObject as? [AnyObject] else {
+            return nil
+        }
+
+        let parts = ranges
+            .compactMap { range(from: $0) }
+            .compactMap { stringForRange($0, on: element) }
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n")
+    }
+
     private static func focusedTextSnapshot(
         from elements: [AXUIElement],
         targetApplication: NSRunningApplication?
@@ -501,35 +575,19 @@ final class FocusedTextInserter {
             return false
         }
 
-        if targetApplication?.bundleIdentifier == "com.openai.codex" {
-            let nonDraftLabels = [
-                stringAttribute(kAXDescriptionAttribute as String, on: element),
-                stringAttribute(kAXTitleAttribute as String, on: element),
-                stringAttribute(kAXHelpAttribute as String, on: element)
-            ]
-                .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-            if nonDraftLabels.contains(trimmed) {
-                return false
-            }
+        let nonDraftLabels = [
+            stringAttribute(kAXDescriptionAttribute as String, on: element),
+            stringAttribute(kAXTitleAttribute as String, on: element),
+            stringAttribute(kAXHelpAttribute as String, on: element)
+        ]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if nonDraftLabels.contains(trimmed) {
+            return false
         }
 
-        return !isKnownNonDraftPlaceholder(trimmed, targetApplication: targetApplication)
+        return true
     }
-
-    private static func isKnownNonDraftPlaceholder(
-        _ text: String,
-        targetApplication: NSRunningApplication?
-    ) -> Bool {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return true }
-        guard targetApplication?.bundleIdentifier == "com.openai.codex" else { return false }
-        return codexNonDraftPlaceholderTexts.contains(trimmed)
-    }
-
-    private static let codexNonDraftPlaceholderTexts: Set<String> = [
-        "要求后续变更"
-    ]
 
     private static func stringForFullRange(on element: AXUIElement) -> String? {
         let characterCount = integerAttribute("AXNumberOfCharacters", on: element)
@@ -543,7 +601,11 @@ final class FocusedTextInserter {
             return nil
         }
 
-        var range = fullRange
+        return stringForRange(fullRange, on: element)
+    }
+
+    private static func stringForRange(_ requestedRange: CFRange, on element: AXUIElement) -> String? {
+        var range = requestedRange
         guard let rangeValue = AXValueCreate(.cfRange, &range) else {
             return nil
         }
@@ -575,8 +637,7 @@ final class FocusedTextInserter {
             return true
         }
 
-        return isAttributeSettable(kAXValueAttribute as String, on: element)
-            || isAttributeSettable(kAXSelectedTextAttribute as String, on: element)
+        return isAttributeSettable(kAXSelectedTextAttribute as String, on: element)
             || isAttributeSettable(kAXSelectedTextRangeAttribute as String, on: element)
     }
 
