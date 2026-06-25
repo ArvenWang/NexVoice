@@ -49,6 +49,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var targetApplicationForCurrentSession: NSRunningApplication?
     private var selectedTextContextForCurrentSession: SelectedTextContext?
     private var rewriteContextForCurrentSession: VoiceRewriteContext?
+    private var focusedDraftForCurrentSession: String?
+    private var hasEditableSelectionForCurrentSession = false
     private var screenReplyCapturedContextForCurrentSession: ScreenReplyCapturedContext?
     private var pendingScreenReplyVoiceInstruction: String?
     private var didInsertCurrentSession = false
@@ -419,6 +421,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         targetApplicationForCurrentSession = NSWorkspace.shared.frontmostApplication
         selectedTextContextForCurrentSession = nil
         rewriteContextForCurrentSession = nil
+        focusedDraftForCurrentSession = nil
+        hasEditableSelectionForCurrentSession = false
         screenReplyCapturedContextForCurrentSession = nil
         pendingScreenReplyVoiceInstruction = nil
         didInsertCurrentSession = false
@@ -517,6 +521,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         targetApplicationForCurrentSession = NSWorkspace.shared.frontmostApplication
         selectedTextContextForCurrentSession = nil
         rewriteContextForCurrentSession = nil
+        focusedDraftForCurrentSession = nil
+        hasEditableSelectionForCurrentSession = false
         screenReplyCapturedContextForCurrentSession = nil
         pendingScreenReplyVoiceInstruction = nil
         didInsertCurrentSession = false
@@ -543,6 +549,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         selectedTextContextForCurrentSession = await textInserter.selectedTextContext(
             in: targetApplicationForCurrentSession
         )
+        hasEditableSelectionForCurrentSession = textInserter.hasEditableSelection(
+            in: targetApplicationForCurrentSession
+        )
+        focusedDraftForCurrentSession = hasEditableSelectionForCurrentSession
+            ? nil
+            : await textInserter.focusedDraftSnapshot(in: targetApplicationForCurrentSession)
         let personalDictionary = VoicePersonalDictionaryStore.load()
         rewriteContextForCurrentSession = textInserter.rewriteContext(
             in: targetApplicationForCurrentSession,
@@ -671,6 +683,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshMenuState()
 
         let originalText = text
+        let continuousRewriteDecision = VoiceContinuousRewritePolicy.decision(
+            focusedDraft: focusedDraftForCurrentSession,
+            newTranscript: originalText,
+            hasEditableSelection: hasEditableSelectionForCurrentSession
+        )
+        Task {
+            await ContinuousRewriteDiagnosticsLogger.shared.log(
+                ContinuousRewriteDiagnosticEvent(
+                    event: "decision",
+                    appName: targetApplicationForCurrentSession?.localizedName,
+                    bundleIdentifier: targetApplicationForCurrentSession?.bundleIdentifier,
+                    hasEditableSelection: hasEditableSelectionForCurrentSession,
+                    focusedDraft: focusedDraftForCurrentSession,
+                    newTranscript: originalText,
+                    insertionMode: continuousRewriteDecision.insertionMode
+                )
+            )
+        }
         let outputLanguage = selectedOutputLanguage
         let selectedTextContext = selectedTextContextForCurrentSession
         let rewriteContext = rewriteContextForCurrentSession ?? VoiceRewriteContext(
@@ -716,9 +746,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             } else {
                 let textForInsertion: String
+                var insertionMode = continuousRewriteDecision.insertionMode
                 do {
                     textForInsertion = try await self.finalRewriteService.rewrite(
-                        originalText,
+                        continuousRewriteDecision.rewriteSource,
                         outputLanguage: outputLanguage,
                         style: rewriteStyle,
                         context: rewriteContext
@@ -726,6 +757,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 } catch is CancellationError {
                     return
                 } catch {
+                    insertionMode = .insertAtCursor
                     textForInsertion = VoicePersonalDictionaryTextProtector.protect(
                         VoiceRewriteFallbackPolicy.fallbackText(for: originalText),
                         dictionary: rewriteContext.personalDictionary
@@ -739,7 +771,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         textForInsertion,
                         originalASRText: originalText,
                         rewriteContext: rewriteContext,
-                        into: targetApplication
+                        into: targetApplication,
+                        insertionMode: insertionMode
                     )
                 }
             }
@@ -749,6 +782,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showContextualResult(_ text: String, anchorRect: CGRect?) {
         selectedTextContextForCurrentSession = nil
         rewriteContextForCurrentSession = nil
+        focusedDraftForCurrentSession = nil
+        hasEditableSelectionForCurrentSession = false
         latestRecoverableASRText = nil
         pendingFailedTranscriptionRetry = nil
         insertedTextPreview = nil
@@ -763,18 +798,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ text: String,
         originalASRText: String,
         rewriteContext: VoiceRewriteContext,
-        into targetApplication: NSRunningApplication?
+        into targetApplication: NSRunningApplication?,
+        insertionMode: VoiceContinuousRewriteInsertionMode = .insertAtCursor
     ) {
         guard !isCurrentSessionCancelled else { return }
         insertedTextPreview = text
         isRewritingCurrentSession = false
         rewriteTask = nil
         rewriteContextForCurrentSession = nil
+        focusedDraftForCurrentSession = nil
+        hasEditableSelectionForCurrentSession = false
         latestRecoverableASRText = nil
         pendingFailedTranscriptionRetry = nil
 
         do {
-            try textInserter.insert(text, into: targetApplication)
+            switch insertionMode {
+            case .insertAtCursor:
+                try textInserter.insert(text, into: targetApplication)
+            case .replaceFocusedDraft:
+                try textInserter.replaceFocusedDraft(text, into: targetApplication)
+            }
             dictionaryLearningMonitor.observePossibleEdit(
                 insertedText: text,
                 originalASRText: originalASRText,
@@ -910,6 +953,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         finishScreenReplyInstructionSession()
         rewriteTask = nil
         rewriteContextForCurrentSession = nil
+        focusedDraftForCurrentSession = nil
+        hasEditableSelectionForCurrentSession = false
         do {
             try textInserter.insert(reply, into: targetApplication)
             captionPanel.showInsertedText(reply)
@@ -925,6 +970,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         finishScreenReplyInstructionSession()
         rewriteTask = nil
         rewriteContextForCurrentSession = nil
+        focusedDraftForCurrentSession = nil
+        hasEditableSelectionForCurrentSession = false
         let message: String
         if case ScreenReplyCaptureError.screenRecordingPermissionRequired = error {
             ScreenReplyContextCaptureService.requestScreenRecordingPermission()
@@ -974,6 +1021,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pendingFailedTranscriptionRetry = nil
         selectedTextContextForCurrentSession = nil
         rewriteContextForCurrentSession = nil
+        focusedDraftForCurrentSession = nil
+        hasEditableSelectionForCurrentSession = false
         screenReplyCapturedContextForCurrentSession = nil
         pendingScreenReplyVoiceInstruction = nil
         targetApplicationForCurrentSession = nil
@@ -1005,6 +1054,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             isRewritingCurrentSession = false
             rewriteTask?.cancel()
             rewriteTask = nil
+            focusedDraftForCurrentSession = nil
+            hasEditableSelectionForCurrentSession = false
             captionPanel.showStatus("未识别到语音", isError: false, autoHideDelay: 0.9)
             statusItem?.button?.title = "NexVoice"
             refreshMenuState()

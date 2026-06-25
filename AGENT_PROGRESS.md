@@ -8,9 +8,48 @@
 - 项目形态：SwiftPM macOS 菜单栏 App，核心模块为 `NexVoiceCore`，宿主为 `NexVoiceHost`。
 - 默认入口：短按右 Alt 开始语音输入，再按一次结束；长按右 Alt 约 0.55 秒进入看屏自动回复；ESC 可取消录音、等待 final、AI 改写或看屏回复中的会话。
 - 当前主链路：腾讯云实时 ASR `16k_zh_en` -> DeepSeek `deepseek-v4-flash` 最终整理 -> 写入当前聚焦输入框。
+- 普通语音输入已增加第一版“基于输入框短草稿连续改写”：录音开始时读取当前输入框草稿，语音结束后把“已有草稿 + 本轮语音”交给 DeepSeek 输出完整新草稿，并在安全条件满足时替换当前输入框全文；空输入框、输入框内已有选区、超长草稿先降级为旧的光标粘贴/选区替换方式。
 - 本地 SenseVoice Small 和 WhisperKit large-v3 保留为兜底和质量对照，不是当前默认主链路。
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
+
+## 本轮追加（2026-06-25：输入框短草稿连续改写可行性）
+
+- 根据用户确认，先把普通语音输入升级为“基于当前输入框内容连续改写”的第一版可行性实现，而不是新增一个独立模式。
+- 新增 `Sources/NexVoiceCore/VoiceContinuousRewritePolicy.swift`：
+  - 输入框为空时维持旧逻辑，只整理本轮语音并在光标处粘贴。
+  - 输入框有短草稿且没有输入框选区时，生成“连续改写输入”源文本，要求 DeepSeek 把已有草稿和本轮新增语音合并成完整新草稿。
+  - 输入框内已有选区时先不全文替换，避免用户只想改选中片段时误伤整段。
+  - 草稿超过 `2000` 字符时先不全文替换，为后续长文本/网页编辑器按自然段或局部范围改写留出兼容空间。
+- `VoiceRewritePromptPolicy` 增加连续改写专用 Prompt 规则：明确输出一版完整新草稿，不要只改写本轮新增语音，也不要简单追加。
+- `FocusedTextInserter` 增加 `replaceFocusedDraft(...)`：确认当前焦点仍是可编辑输入框后，用 `Command+A` + 粘贴替换当前输入框草稿；如果不满足连续改写策略则仍使用原来的粘贴路径。
+- `AppDelegate` 在录音开始时记录输入框草稿快照和输入框选区状态；最终整理时按策略决定是替换草稿还是旧式插入。AI 改写失败时会降级为只插入本轮 ASR 清理结果，不覆盖已有草稿。
+- 用户复测后日志确认：运行的确实是 `dist/NexVoice.app`，但 DeepSeek prompt 里没有 `连续改写输入`，说明当前 App 未读到 Codex 输入框已有草稿，而不是用户跑错版本。
+- 根因：Codex 输入框无法通过常规 AXValue 读取全文，`focusedTextPreview` 为空，连续改写策略自动降级为只整理本轮语音。
+- 修复：`FocusedTextInserter.focusedDraftSnapshot(...)` 增加兜底读取，AX 读不到时在录音开始阶段临时 `Command+A` / `Command+C` 复制当前输入框全文，恢复剪贴板后收起选区；该兜底只在没有输入框内选区时启用，避免破坏“只改选中片段”的场景。
+- 用户再次复测后仍未触发连续改写，日志显示 DeepSeek 仍只收到本轮语音；进一步确认阻断点是兜底读取前仍要求 `focusedEditableElement != nil`，而 Codex 输入框很可能无法被识别为 AX 可编辑元素。
+- 二次修复：`focusedDraftSnapshot(...)` 不再依赖 `focusedEditableElement`，只要目标 App 存在且辅助功能权限可用，就尝试键盘兜底读取；`replaceFocusedDraft(...)` 也不再因为 AX 元素识别失败而退回普通插入。
+- 新增 `Sources/NexVoiceHost/ContinuousRewriteDiagnosticsLogger.swift`，每次 final 后记录连续改写决策到 `~/Library/Application Support/NexVoice/Logs/ContinuousRewrite.jsonl`，包含是否有输入框选区、是否读到草稿、草稿长度、新语音长度和最终插入策略。
+- 已重启当前测试版：`/Users/nefish/Desktop/WorkSpace/Coding/NexVoice/dist/NexVoice.app`，最新运行 PID 曾确认为 `67508`；上一轮 dist 进程 `51799` 已退出；新构建签名时间为 `2026-06-25 22:19`，CDHash 前缀 `8e649c`。
+- 已构建但未替换安装版：`dist/NexVoice.app`，包含本机 DeepSeek / 腾讯云 ASR 嵌入配置。
+- 验证：
+  - 新增 `VoiceContinuousRewritePolicyTests`，覆盖短草稿连续改写、空输入框降级、输入框选区降级、超长草稿降级、Prompt 完整草稿约束。
+  - `swift test --disable-sandbox --filter VoiceContinuousRewrite --quiet` 通过，5 个测试。
+  - `swift test --disable-sandbox --quiet` 通过，145 个测试。
+  - `swift build --disable-sandbox -c release --product NexVoiceApp` 通过。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=2 dist/NexVoice.app` 通过；确认 `DeepSeek.json` 和 `TencentCloudASR.json` 已嵌入。
+- 未完成 / 下一步：
+  - 尚未做真实 App 内语音验收，需要安装/启动新版后，在微信、飞书、Codex 输入框里分 2-3 次语音补充同一段内容，确认会替换为完整结构化草稿。
+  - 长文本和网页编辑器暂不全文替换；后续建议新增“自然段 / 光标附近段落 / 可编辑区域类型”规则，再接入 Notion、飞书文档、网页富文本编辑器等场景。
+  - 用户复测确认连续改写可用，但当前键盘兜底会出现可感知的全选闪烁，体验不够无感。
+  - 已做方向调研：Apple 官方 AX 路线可用 `AXUIElementSetAttributeValue` / `AXSelectedTextRange` / `AXStringForRange` 等能力尝试无感读写；但 Electron / WebView / 终端 / 自定义编辑器经常暴露不完整，开源工具和自动化工具常见仍会回退到剪贴板 + 模拟按键。
+  - 后续规划采用“输入框读写引擎分层”，不要继续只修补 `Command+A/C/V`：
+    1. `AXDirectTextAdapter`：优先尝试 AXValue / selected range / string-for-range，无感读取和替换输入框内容。
+    2. `ElectronAccessibilityAdapter`：针对 Electron/Codex，尝试设置 `AXManualAccessibility` 后重新读取 AX tree，减少键盘兜底依赖。
+    3. `BrowserDOMTextAdapter`：针对 Chrome / Safari / Edge 的网页编辑器，后续通过 Apple Events / JXA 读取 `document.activeElement`、selection、contenteditable；需要用户开启浏览器 Apple Events 权限。
+    4. `KeyboardFallbackAdapter`：保留当前 `Command+A/C/V` 方案作为最后兜底，并尽量缩短选区停留时间、恢复剪贴板和光标。
+  - 下一轮优先实现 `AXDirectTextAdapter + 读写路径诊断日志`，目标是能无感处理原生输入框；如果 Codex 仍不支持，再专项攻 Electron/Codex。
 
 ## 本轮完成（2026-06-25：看屏回复 OCR 诊断与长语音截断排查）
 

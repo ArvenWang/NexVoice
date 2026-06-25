@@ -210,6 +210,8 @@ public enum VoiceRewritePromptPolicy {
         语言：
         \(languageInstruction)
 
+        \(continuousRewriteInstruction(for: text))
+
         语义动作：
         \(VoiceUtteranceIntent.infer(from: text).promptInstruction)
 
@@ -223,6 +225,23 @@ public enum VoiceRewritePromptPolicy {
 
         原文：
         \(text.trimmingCharacters(in: .whitespacesAndNewlines))
+        """
+    }
+
+    private static func continuousRewriteInstruction(for text: String) -> String {
+        guard text.contains("连续改写输入："),
+              text.contains("已有输入框草稿："),
+              text.contains("本轮新增语音：")
+        else {
+            return ""
+        }
+
+        return """
+        连续改写：
+        - 这是一次基于当前输入框草稿的连续改写，不是单独整理本轮新增语音。
+        - 请把“已有输入框草稿”和“本轮新增语音”合并理解，输出一版完整的新草稿。
+        - 不要只改写本轮新增语音，也不要简单追加；需要去重、理顺顺序、合并相近观点，并按内容自然分段或结构化。
+        - 如果新增语音是在补充上一轮内容，请保留已有草稿的有效信息，并把新增内容融合进去。
         """
     }
 

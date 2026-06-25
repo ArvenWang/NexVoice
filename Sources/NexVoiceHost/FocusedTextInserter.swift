@@ -69,6 +69,39 @@ final class FocusedTextInserter {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: restoreWorkItem)
     }
 
+    func replaceFocusedDraft(_ text: String, into targetApplication: NSRunningApplication?) throws {
+        let insertionText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !insertionText.isEmpty else { throw FocusedTextInsertionError.emptyText }
+        guard canPostKeyboardEvents else {
+            Self.requestAccessibilityPermission()
+            throw FocusedTextInsertionError.accessibilityPermissionRequired
+        }
+        restoreWorkItem?.cancel()
+        let snapshot = PasteboardSnapshot(pasteboard: pasteboard)
+
+        pasteboard.clearContents()
+        guard pasteboard.setString(insertionText, forType: .string) else {
+            throw FocusedTextInsertionError.pasteboardWriteFailed
+        }
+
+        let insertionChangeCount = pasteboard.changeCount
+        targetApplication?.activate(options: [.activateIgnoringOtherApps])
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            Self.postCommandA()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+            Self.postCommandV()
+        }
+
+        let restoreWorkItem = DispatchWorkItem { [weak self] in
+            guard let self, self.pasteboard.changeCount == insertionChangeCount else { return }
+            snapshot.restore(to: self.pasteboard)
+        }
+        self.restoreWorkItem = restoreWorkItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4, execute: restoreWorkItem)
+    }
+
     func selectedText(in targetApplication: NSRunningApplication?) async -> String? {
         let context = await selectedTextContext(in: targetApplication)
         return context?.text
@@ -126,6 +159,42 @@ final class FocusedTextInserter {
         return Self.focusedTextPreview(from: elementChain)
     }
 
+    func focusedDraftSnapshot(in targetApplication: NSRunningApplication?) async -> String? {
+        if let focusedText = focusedTextPreview(in: targetApplication),
+           !focusedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return focusedText
+        }
+        guard canPostKeyboardEvents,
+              targetApplication != nil else {
+            return nil
+        }
+
+        restoreWorkItem?.cancel()
+        let snapshot = PasteboardSnapshot(pasteboard: pasteboard)
+        pasteboard.clearContents()
+        let baselineChangeCount = pasteboard.changeCount
+
+        targetApplication?.activate(options: [.activateIgnoringOtherApps])
+        try? await Task.sleep(nanoseconds: 80_000_000)
+        Self.postCommandA()
+        try? await Task.sleep(nanoseconds: 80_000_000)
+        Self.postCommandC()
+        try? await Task.sleep(nanoseconds: 180_000_000)
+
+        let copiedText = pasteboard.changeCount != baselineChangeCount
+            ? pasteboard.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            : nil
+        snapshot.restore(to: pasteboard)
+        if copiedText?.isEmpty == false {
+            Self.postPlainKey(124)
+        }
+        return copiedText?.isEmpty == false ? copiedText : nil
+    }
+
+    func hasEditableSelection(in targetApplication: NSRunningApplication?) -> Bool {
+        Self.hasEditableSelectedText(in: targetApplication)
+    }
+
     func focusedInputFrame(in targetApplication: NSRunningApplication?) -> CGRect? {
         let focusedElement = Self.focusedElement(in: targetApplication) ?? Self.systemFocusedElement()
         let elementChain = focusedElement.map { Self.elementAndParents(from: $0, maxDepth: 4) } ?? []
@@ -152,8 +221,20 @@ final class FocusedTextInserter {
         postCommandKey(9)
     }
 
+    private static func postCommandA() {
+        postCommandKey(0)
+    }
+
     private static func postCommandC() {
         postCommandKey(8)
+    }
+
+    private static func postPlainKey(_ keyCode: CGKeyCode) {
+        let source = CGEventSource(stateID: .hidSystemState)
+        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true)
+        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
+        keyDown?.post(tap: .cghidEventTap)
+        keyUp?.post(tap: .cghidEventTap)
     }
 
     private static func hasEditableSelectedText(in targetApplication: NSRunningApplication?) -> Bool {
@@ -178,6 +259,12 @@ final class FocusedTextInserter {
             return nil
         }
         return (focusedObject as! AXUIElement)
+    }
+
+    private static func focusedEditableElement(in targetApplication: NSRunningApplication?) -> AXUIElement? {
+        let focusedElement = focusedElement(in: targetApplication) ?? systemFocusedElement()
+        let elementChain = focusedElement.map { elementAndParents(from: $0, maxDepth: 4) } ?? []
+        return elementChain.first(where: isEditableTextElement)
     }
 
     private static func bottomEditableInputFrame(in targetApplication: NSRunningApplication?) -> CGRect? {
