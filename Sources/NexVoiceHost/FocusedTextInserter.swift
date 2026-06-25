@@ -260,6 +260,7 @@ final class FocusedTextInserter {
         visited += 1
 
         if !isEditableTextElement(element),
+           !isDraftWritableElement(element),
            let selectedText = selectedText(on: element),
            !selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let anchorRect = frameAttribute(on: element)
@@ -313,7 +314,7 @@ final class FocusedTextInserter {
     private static func focusedEditableElement(in targetApplication: NSRunningApplication?) -> AXUIElement? {
         let focusedElement = focusedElement(in: targetApplication) ?? systemFocusedElement()
         let elementChain = focusedElement.map { elementAndParents(from: $0, maxDepth: 4) } ?? []
-        return elementChain.first(where: isEditableTextElement)
+        return elementChain.first(where: isDraftWritableElement)
             ?? bottomEditableInputElement(in: targetApplication)
     }
 
@@ -543,7 +544,7 @@ final class FocusedTextInserter {
         from elements: [AXUIElement],
         targetApplication: NSRunningApplication?
     ) -> FocusedDraftSnapshot? {
-        for element in elements where isEditableTextElement(element) {
+        for element in elements where isDraftReadableElement(element) {
             if let selectedText = stringAttribute(kAXSelectedTextAttribute as String, on: element),
                isRealFocusedDraft(selectedText, on: element, targetApplication: targetApplication) {
                 return FocusedDraftSnapshot(text: selectedText, method: .axValue)
@@ -639,6 +640,14 @@ final class FocusedTextInserter {
 
         return isAttributeSettable(kAXSelectedTextAttribute as String, on: element)
             || isAttributeSettable(kAXSelectedTextRangeAttribute as String, on: element)
+    }
+
+    private static func isDraftReadableElement(_ element: AXUIElement) -> Bool {
+        isEditableTextElement(element) || isDraftWritableElement(element)
+    }
+
+    private static func isDraftWritableElement(_ element: AXUIElement) -> Bool {
+        isAttributeSettable(kAXValueAttribute as String, on: element)
     }
 
     private static func stringAttribute(_ attribute: String, on element: AXUIElement) -> String? {

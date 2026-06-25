@@ -43,6 +43,31 @@
   - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过。
   - 修复 `.githooks/pre-commit` 里的陈旧 plist 路径，并重新安装本地 hook；后续提交会调用统一 `scripts/bump_version.sh`。
 
+## 本轮追加（2026-06-26：恢复 Codex 连续整体改写触发）
+
+- 用户复测反馈：
+  - 可编辑输入框内选中文字后语音，不再进入划词问答，这一点已确认 OK。
+  - 连续结构化仍不触发，并且不是单纯没有分段，而是没有做“已有内容 + 新语音”的整体改写。
+- 日志定位：
+  - `DeepSeekRewrite.jsonl` 显示最近几次 `final_rewrite` 都是 `succeeded`，说明 DeepSeek 改写服务没有失效。
+  - `ContinuousRewrite.jsonl` 中最近几轮 Codex 语音全部是 `focusedDraftCharacters=0`、`insertionMode=insertAtCursor`，说明没有读到输入框已有草稿，所以没有进入整体改写。
+  - 对比上一版可触发整体改写的日志，能触发时 `focusedDraftCharacters` 为 `30/96`，`draftReadMethod=axValue`，`insertionMode=replaceFocusedDraft`。
+  - 根因：上一轮为了避免普通容器误判输入框，把 `AXValue` 可写元素从“可编辑元素”里整体排除；但 Codex 的草稿读取正依赖 `AXValue`，因此把整体改写入口一并切断了。
+- 本轮修复：
+  - 将“输入框/划词判断”和“草稿读取/替换判断”分层：
+    - 划词问答仍不把普通 `AXValue` 可写容器当输入框，也不恢复剪贴板盲复制。
+    - 草稿读取和草稿替换重新允许读取/写入 `AXValue` 可写元素，以恢复 Codex 的 `focusedDraft` 捕获。
+  - `nonEditableSelectedTextContext(...)` 会跳过可写草稿元素，避免输入框选中文字重新误触发划词问答。
+- 版本递增：`0.1.38 (39)` -> `0.1.39 (40)`。
+- 当前测试版已构建并启动：
+  - 运行路径：`/Users/nefish/Desktop/Coding/NexVoice/dist/NexVoice.app`
+  - 运行 PID：`72723`
+  - 包内版本：`0.1.39 (40)`
+- 验证：
+  - `swift test` 通过，145 个测试。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过。
+
 ## 本轮追加（2026-06-26：可编辑选区替换与连续草稿读取兜底）
 
 - 用户复测反馈：
