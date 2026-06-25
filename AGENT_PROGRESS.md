@@ -13,6 +13,36 @@
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
+## 本轮追加（2026-06-26：Codex 多行连续改写写入修复与语音增强方案）
+
+- 换行问题判断：
+  - DeepSeek 已能输出真实换行；问题发生在 Codex/Electron 输入框写入层。
+  - 非全选 `AXValue` 写入稳定，但会把 Codex 中的多行文本压成单行。
+  - 已拒绝并移除 `Command+A` / 粘贴替换和 AX 全选替换路径，不能再回到这些方案。
+- 本轮修复：
+  - `FocusedTextInserter.replaceFocusedDraft(...)` 新增 Codex 多行专项路径：仅当目标 App 是 `com.openai.codex` 且待写入文本包含真实换行时触发。
+  - 新路径为 `axClearThenUnicodeTyping`：先用 AX 非选择式清空当前输入框，再用 CGEvent Unicode 文本事件输入完整文本。
+  - 这条路径不全选、不写剪贴板、不粘贴；缺点是多行长文本会比 AX 一次性写入慢一些。
+  - `ContinuousRewrite.jsonl` 的 `actualInsertionMethod` 可观察是否命中 `axClearThenUnicodeTyping`。
+- 语音识别增强方案：
+  - 第一优先级：保留当前 16k PCM、40ms 实时发送、热词列表；补充可配置 ASR 参数和日志，例如 `noise_threshold`、`filter_modal`、`sentence_strategy`，先小范围试验，不默认强开高阈值。
+  - 第二优先级：做本地“麦克风质量面板”和录音诊断，显示输入音量、是否太小、是否削波、环境噪声大不大；这比盲目加降噪更可靠。
+  - 第三优先级：如果旁人说话是主要问题，再评估腾讯云说话人分离或本地说话人验证；它们能辅助过滤多人，但复杂度和误伤风险都高，不建议直接进主链路。
+  - 不建议优先做强降噪 / AGC：资料和通用 ASR 最佳实践都提示过度前处理可能降低识别准确率，尤其容易误伤小声说话。
+- 版本递增：`0.1.33 (34)` -> `0.1.34 (35)`。
+- 当前测试版已构建并启动：
+  - 运行路径：`/Users/nefish/Desktop/Coding/NexVoice/dist/NexVoice.app`
+  - 运行 PID：`3256`
+  - CDHash 前缀：`9a6bec9732805135fa4ddf037001e14ad7d11563`
+  - 签名时间：`2026-06-26 02:11:18`
+- 验证：
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 通过。
+  - `swift test --disable-sandbox --quiet` 通过，145 个测试。
+  - `git diff --check` 通过。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=2 dist/NexVoice.app` 通过。
+  - 已确认包内版本为 `0.1.34 (35)`，`NexVoiceEmbeddedConfig/DeepSeek.json` 和 `TencentCloudASR.json` 存在。
+
 ## 本轮追加（2026-06-26：清理冗余并同步远端）
 
 - 用户复测结论：
