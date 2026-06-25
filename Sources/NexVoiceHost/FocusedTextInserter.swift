@@ -116,6 +116,7 @@ final class FocusedTextInserter {
 
     func selectedTextContext(in targetApplication: NSRunningApplication?) async -> SelectedTextContext? {
         guard canPostKeyboardEvents else { return nil }
+        guard !Self.hasFocusedEditableElement(in: targetApplication) else { return nil }
         guard !Self.hasEditableSelectedText(in: targetApplication) else { return nil }
 
         restoreWorkItem?.cancel()
@@ -166,7 +167,14 @@ final class FocusedTextInserter {
     func focusedTextPreview(in targetApplication: NSRunningApplication?) -> String? {
         let focusedElement = Self.focusedElement(in: targetApplication) ?? Self.systemFocusedElement()
         let elementChain = focusedElement.map { Self.elementAndParents(from: $0, maxDepth: 4) } ?? []
-        return Self.focusedTextSnapshot(from: elementChain, targetApplication: targetApplication)?.text
+        if let snapshot = Self.focusedTextSnapshot(from: elementChain, targetApplication: targetApplication) {
+            return snapshot.text
+        }
+        if let bottomElement = Self.bottomEditableInputElement(in: targetApplication),
+           let snapshot = Self.focusedTextSnapshot(from: [bottomElement], targetApplication: targetApplication) {
+            return snapshot.text
+        }
+        return nil
     }
 
     func focusedDraftSnapshot(in targetApplication: NSRunningApplication?) async -> String? {
@@ -181,6 +189,11 @@ final class FocusedTextInserter {
             from: elementChain,
             targetApplication: targetApplication
         ) {
+            latestDraftReadMethod = snapshot.method
+            return snapshot
+        }
+        if let bottomElement = Self.bottomEditableInputElement(in: targetApplication),
+           let snapshot = Self.focusedTextSnapshot(from: [bottomElement], targetApplication: targetApplication) {
             latestDraftReadMethod = snapshot.method
             return snapshot
         }
@@ -231,6 +244,14 @@ final class FocusedTextInserter {
         }
     }
 
+    private static func hasFocusedEditableElement(in targetApplication: NSRunningApplication?) -> Bool {
+        guard let focusedElement = focusedElement(in: targetApplication) ?? systemFocusedElement() else {
+            return false
+        }
+
+        return elementAndParents(from: focusedElement, maxDepth: 4).contains(where: isEditableTextElement)
+    }
+
     private static func focusedElement(in targetApplication: NSRunningApplication?) -> AXUIElement? {
         guard let processIdentifier = targetApplication?.processIdentifier else { return nil }
         let applicationElement = AXUIElementCreateApplication(processIdentifier)
@@ -249,6 +270,7 @@ final class FocusedTextInserter {
         let focusedElement = focusedElement(in: targetApplication) ?? systemFocusedElement()
         let elementChain = focusedElement.map { elementAndParents(from: $0, maxDepth: 4) } ?? []
         return elementChain.first(where: isEditableTextElement)
+            ?? bottomEditableInputElement(in: targetApplication)
     }
 
     private static func replaceFocusedDraftUsingAXValue(
@@ -305,6 +327,14 @@ final class FocusedTextInserter {
     }
 
     private static func bottomEditableInputFrame(in targetApplication: NSRunningApplication?) -> CGRect? {
+        bottomEditableInputCandidate(in: targetApplication)?.frame
+    }
+
+    private static func bottomEditableInputElement(in targetApplication: NSRunningApplication?) -> AXUIElement? {
+        bottomEditableInputCandidate(in: targetApplication)?.element
+    }
+
+    private static func bottomEditableInputCandidate(in targetApplication: NSRunningApplication?) -> EditableInputCandidate? {
         guard let processIdentifier = targetApplication?.processIdentifier else { return nil }
         let applicationElement = AXUIElementCreateApplication(processIdentifier)
         var roots: [AXUIElement] = []
@@ -313,11 +343,11 @@ final class FocusedTextInserter {
         }
         roots.append(contentsOf: elementArrayAttribute(kAXWindowsAttribute as String, on: applicationElement))
 
-        var candidates: [CGRect] = []
+        var candidates: [EditableInputCandidate] = []
         var visited = 0
         for root in roots {
             let windowFrame = frameAttribute(on: root)
-            collectEditableInputFrames(
+            collectEditableInputCandidates(
                 from: root,
                 windowFrame: windowFrame,
                 candidates: &candidates,
@@ -327,17 +357,17 @@ final class FocusedTextInserter {
         }
 
         return candidates.max { lhs, rhs in
-            if abs(lhs.minY - rhs.minY) > 8 {
-                return lhs.minY < rhs.minY
+            if abs(lhs.frame.minY - rhs.frame.minY) > 8 {
+                return lhs.frame.minY < rhs.frame.minY
             }
-            return lhs.width < rhs.width
+            return lhs.frame.width < rhs.frame.width
         }
     }
 
-    private static func collectEditableInputFrames(
+    private static func collectEditableInputCandidates(
         from element: AXUIElement,
         windowFrame: CGRect?,
-        candidates: inout [CGRect],
+        candidates: inout [EditableInputCandidate],
         visited: inout Int,
         maxNodes: Int
     ) {
@@ -346,11 +376,11 @@ final class FocusedTextInserter {
 
         if isEditableTextElement(element), let frame = frameAttribute(on: element),
            isLikelyBottomInputFrame(frame, in: windowFrame) {
-            candidates.append(frame)
+            candidates.append(EditableInputCandidate(element: element, frame: frame))
         }
 
         for child in elementArrayAttribute(kAXChildrenAttribute as String, on: element) {
-            collectEditableInputFrames(
+            collectEditableInputCandidates(
                 from: child,
                 windowFrame: windowFrame,
                 candidates: &candidates,
@@ -358,6 +388,11 @@ final class FocusedTextInserter {
                 maxNodes: maxNodes
             )
         }
+    }
+
+    private struct EditableInputCandidate {
+        let element: AXUIElement
+        let frame: CGRect
     }
 
     private static func isLikelyBottomInputFrame(_ frame: CGRect, in windowFrame: CGRect?) -> Bool {
@@ -724,7 +759,7 @@ final class FocusedTextInserter {
         return true
     }
 
-    private static func unicodeInputChunks(from text: String, maxUTF16Units: Int = 512) -> [String] {
+    private static func unicodeInputChunks(from text: String, maxUTF16Units: Int = 2_048) -> [String] {
         var chunks: [String] = []
         var current = ""
         var currentLength = 0

@@ -13,6 +13,39 @@
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
+## 本轮追加（2026-06-26：可编辑选区替换与连续草稿读取兜底）
+
+- 用户复测反馈：
+  - Codex 换行已经成功。
+  - 询问超过 Unicode 分块上限后是否还会复现尾部错字。
+  - 在可编辑输入框内选中段落后语音，预期是替换选区，但实际触发了“划词问答”。
+  - 最近一次多轮语音看起来没有结构化。
+- 日志定位：
+  - 最近“一整段未结构化”的几次都是 `insertionMode=insertAtCursor` 且 `focusedDraftCharacters=0`，说明没有读到输入框已有草稿，因此没有进入连续改写合并逻辑。
+  - DeepSeek 对单次语音确实做了整理，但它没有拿到前几次草稿，自然无法做全局分段结构化。
+  - 光标偏前最近没有稳定复现；这轮先不继续加大光标干预。
+- 修复：
+  - 可编辑输入框内只要焦点链路包含 editable 元素，就不再进入 `selectedTextContext` 划词问答模式；后续语音按普通输入处理，让系统用当前可编辑选区完成替换。
+  - `focusedDraftSnapshotResult(...)` 和 `focusedTextPreview(...)` 增加底部输入框兜底读取：当 AX 焦点没有暴露到输入框时，尝试读取窗口底部的可编辑输入框，改善 Codex 读不到已有草稿导致连续改写不触发的问题。
+  - `replaceFocusedDraft(...)` 的目标输入框定位也增加底部输入框兜底，减少焦点偶发漂移时写不到输入框的概率。
+  - Unicode 单次输入上限从 512 UTF-16 单元提高到 2048；超过 2048 仍会分块，但普通 Codex 语音草稿基本不会触发，且跨块已有 20ms 间隔。
+- 当前说明：
+  - “512”不是业务字节数，也不是模型限制；它只是上一版输入事件分块大小。
+  - 这次提高到 2048 后，理论上极长文本仍可能跨块，但常规语音输入基本不会再走跨块路径。
+- 版本递增：`0.1.35 (36)` -> `0.1.36 (37)`。
+- 当前测试版已构建并启动：
+  - 运行路径：`/Users/nefish/Desktop/Coding/NexVoice/dist/NexVoice.app`
+  - 运行 PID：`34909`
+  - CDHash 前缀：`7f4aec46e6a14346b88901accfd64ab310d9e139`
+  - 签名时间：`2026-06-26 02:27:03`
+- 验证：
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 通过。
+  - `swift test --disable-sandbox --quiet` 通过，145 个测试。
+  - `git diff --check` 通过。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=2 dist/NexVoice.app` 通过。
+  - 已确认包内版本为 `0.1.36 (37)`，`NexVoiceEmbeddedConfig/DeepSeek.json` 和 `TencentCloudASR.json` 存在。
+
 ## 本轮追加（2026-06-26：修复 Codex 多行输入乱序与光标偏前）
 
 - 用户复测反馈：
