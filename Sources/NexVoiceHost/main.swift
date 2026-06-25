@@ -531,6 +531,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func beginTranscriptionAfterSelectionCapture() async {
         targetApplicationForCurrentSession = NSWorkspace.shared.frontmostApplication
+        invalidateCachedFocusedDraftIfNeeded(for: targetApplicationForCurrentSession)
         selectedTextContextForCurrentSession = nil
         rewriteContextForCurrentSession = nil
         focusedDraftForCurrentSession = nil
@@ -843,7 +844,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .insertAtCursor:
                 try textInserter.insert(text, into: targetApplication)
             case .replaceFocusedDraft:
-                try textInserter.replaceFocusedDraft(text, into: targetApplication)
+                if draftReadMethod == .cachedPreviousInsertion,
+                   targetApplication?.bundleIdentifier == "com.openai.codex" {
+                    try textInserter.replaceCachedFocusedDraft(text, into: targetApplication)
+                } else {
+                    try textInserter.replaceFocusedDraft(text, into: targetApplication)
+                }
             }
             updateCachedFocusedDraft(
                 insertedText: text,
@@ -885,9 +891,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusItem?.button?.title = "NexVoice"
             refreshMenuState()
         } catch {
+            Task {
+                await ContinuousRewriteDiagnosticsLogger.shared.log(
+                    ContinuousRewriteDiagnosticEvent(
+                        event: "insertion_failed",
+                        appName: targetApplication?.localizedName,
+                        bundleIdentifier: targetApplication?.bundleIdentifier,
+                        hasEditableSelection: hadEditableSelection,
+                        focusedDraft: nil,
+                        newTranscript: originalASRText,
+                        insertionMode: insertionMode,
+                        draftReadMethod: draftReadMethod,
+                        actualInsertionMethod: textInserter.latestInsertionMethod,
+                        insertedText: text,
+                        errorDescription: error.localizedDescription
+                    )
+                )
+            }
+            cachedFocusedDraft = nil
             captionPanel.showStatus("输入失败", isError: true, autoHideDelay: 1.4)
             statusItem?.button?.title = "NexVoice 出错"
             refreshMenuState()
+        }
+    }
+
+    private func invalidateCachedFocusedDraftIfNeeded(for targetApplication: NSRunningApplication?) {
+        guard let cachedFocusedDraft else { return }
+        guard targetApplication?.bundleIdentifier == cachedFocusedDraft.bundleIdentifier,
+              targetApplication?.processIdentifier == cachedFocusedDraft.processIdentifier else {
+            self.cachedFocusedDraft = nil
+            return
         }
     }
 

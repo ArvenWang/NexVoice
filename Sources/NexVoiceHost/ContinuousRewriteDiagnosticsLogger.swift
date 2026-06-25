@@ -68,6 +68,7 @@ struct ContinuousRewriteDiagnosticEvent: Encodable {
     let readbackBlankLineCount: Int?
     let readbackContainsBlankLine: Bool?
     let readbackMatchesInsertedText: Bool?
+    let errorDescription: String?
 
     init(
         event: String,
@@ -83,6 +84,7 @@ struct ContinuousRewriteDiagnosticEvent: Encodable {
         readbackText: String? = nil,
         readbackMethod: FocusedTextAccessMethod? = nil,
         expectedReadbackText: String? = nil,
+        errorDescription: String? = nil,
         includeTextPreviews: Bool = true
     ) {
         self.timestamp = ISO8601DateFormatter().string(from: Date())
@@ -116,6 +118,7 @@ struct ContinuousRewriteDiagnosticEvent: Encodable {
         } else {
             self.readbackMatchesInsertedText = nil
         }
+        self.errorDescription = errorDescription
     }
 
     private static func preview(_ text: String, limit: Int = 360) -> String {

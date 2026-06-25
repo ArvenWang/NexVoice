@@ -96,6 +96,30 @@
   - `./scripts/build_app.sh release --embed-local-keys` 通过。
   - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过。
 
+## 本轮追加（2026-06-26：缓存串场防护与缓存写回失败修复）
+
+- 用户复测反馈：
+  - 关心本地草稿缓存离开 Codex 后是否会带到其他场景。
+  - 第一次输入后再次语音输入出现“输入失败”。
+- 日志定位：
+  - `0.1.40` 中缓存已命中：`draftReadMethod=cachedPreviousInsertion`、`focusedDraftCharacters=52`、`insertionMode=replaceFocusedDraft`。
+  - DeepSeek 已输出整体改写结果，说明 ASR 和模型链路都不是失败点。
+  - 失败点在写回：缓存草稿来自本地，不代表 Codex AX 当前可替换真实输入框；继续走 AX replace 会失败并显示“输入失败”。
+- 本轮修复：
+  - 进入语音会话时，如果当前前台 App 不是同一个 Codex 进程，立即清空缓存，防止缓存带到其他应用或其他 Codex 进程。
+  - 对 `cachedPreviousInsertion` 增加专用写回路径 `keyboardRangeReplace`：不使用剪贴板、不粘贴；通过键盘选中当前输入框从光标到开头的内容，再用 Unicode 文本直接输入完整改写结果。
+  - 增加 `insertion_failed` 诊断日志，后续如再出现“输入失败”，会记录错误原因和当时的写回方式。
+- 版本递增：`0.1.40 (41)` -> `0.1.41 (42)`。
+- 当前测试版已构建并启动：
+  - 运行路径：`/Users/nefish/Desktop/Coding/NexVoice/dist/NexVoice.app`
+  - 运行 PID：`5012`
+  - 包内版本：`0.1.41 (42)`
+- 验证：
+  - `swift test` 通过，145 个测试。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过。
+  - 已做非 ASR 写入机制试验：TextEdit 临时文档第一次直接替换写入成功，但第二次因 TextEdit 前台文档/焦点不稳定，不能作为 Codex 写回的可靠验收；真实验收需看 Codex 复测日志中的 `actualInsertionMethod=keyboardRangeReplace` 和是否还有 `insertion_failed`。
+
 ## 本轮追加（2026-06-26：可编辑选区替换与连续草稿读取兜底）
 
 - 用户复测反馈：
