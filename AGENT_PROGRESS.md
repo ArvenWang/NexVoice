@@ -13,6 +13,38 @@
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
+## 本轮追加（2026-06-26：回退到早期整篇改写策略，放弃 Codex 换行专项）
+
+- 用户复测反馈：
+  - 当前版本既没有整篇改写结构化，也没有换行；用户可以先不要求换行，但必须恢复“整篇改写”的结构化。
+  - 用户要求回看最近几轮 Git 提交，找到合适的撤回点，不再继续堆读草稿缓存/快捷键补丁。
+- 提交记录判断：
+  - `9b0cf7c feat: add continuous input rewrite` 是整篇连续改写的起点，但当时替换路径使用 `Command+A` + 粘贴，不适合直接整仓回退。
+  - `0713b3a Fix continuous rewrite insertion stability` 是更合适的功能基准点：保留整篇连续改写，用 AXValue 直接替换输入框；缺点是 Codex 可能不保留换行。
+  - `e8fd9a5` / `89420b5` 开始引入 Codex 多行 Unicode 输入和光标修复；后续 `0fe6d95` / `6b46fa7` 引入缓存和键盘范围替换，风险逐步扩大。
+- 本轮修复：
+  - 将 Codex 草稿替换策略退回到 `0713b3a` 的 AXValue 直接替换路径，不再使用 `axClearThenUnicodeTyping`。
+  - 删除 Unicode 直接输入分块逻辑，代码中不再出现 `virtualKey: 0`。
+  - 底部输入框兜底重新允许 AXValue 可写元素作为候选，用于恢复 Codex/Electron 场景下读到当前输入框草稿的机会。
+  - 保留后续修复过的输入框/划词隔离，不整仓回退到旧的剪贴板盲复制方案。
+- 当前取舍：
+  - 优先恢复整篇改写/结构化；Codex 换行暂时不作为目标。
+  - 不恢复本地草稿缓存，不恢复全选粘贴，不恢复键盘范围替换。
+- 版本递增：`0.1.42 (43)` -> `0.1.43 (44)`。
+- 当前测试版已构建并启动：
+  - 运行路径：`/Users/nefish/Desktop/Coding/NexVoice/dist/NexVoice.app`
+  - 运行 PID：`40783`
+  - 包内版本：`0.1.43 (44)`
+- 验证：
+  - `swift test` 通过，145 个测试。
+  - `git diff --check` 通过。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过。
+  - 已检索确认 `axClearThenUnicodeTyping`、`postUnicodeText`、`virtualKey: 0`、`keyboardRangeReplace`、`cachedPreviousInsertion` 均已不存在。
+- 需要用户复测确认：
+  - 连续第二句是否出现 `focusedDraftCharacters>0` 和 `insertionMode=replaceFocusedDraft`。
+  - 如果 Codex 仍不暴露草稿，下一步不再加缓存或快捷键补丁，而应重新评估安全的输入框读写方案。
+
 ## 本轮追加（2026-06-26：撤销危险的 Codex 缓存键盘替换）
 
 - 用户复测反馈：

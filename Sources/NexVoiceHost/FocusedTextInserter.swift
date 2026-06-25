@@ -12,7 +12,6 @@ enum FocusedTextAccessMethod: String {
     case axValue
     case axStringForRange
     case axSetValue
-    case axClearThenUnicodeTyping
     case keyboardInsert
 }
 
@@ -96,11 +95,6 @@ final class FocusedTextInserter {
             throw FocusedTextInsertionError.accessibilityPermissionRequired
         }
         targetApplication?.activate(options: [.activateIgnoringOtherApps])
-        if Self.shouldUseCodexMultilineTypingReplacement(insertionText, in: targetApplication),
-           Self.replaceFocusedDraftUsingAXClearThenUnicodeTyping(insertionText, in: targetApplication) {
-            latestInsertionMethod = .axClearThenUnicodeTyping
-            return
-        }
         if Self.replaceFocusedDraftUsingAXValue(insertionText, in: targetApplication) {
             latestInsertionMethod = .axSetValue
             return
@@ -335,38 +329,6 @@ final class FocusedTextInserter {
         return true
     }
 
-    private static func shouldUseCodexMultilineTypingReplacement(
-        _ text: String,
-        in targetApplication: NSRunningApplication?
-    ) -> Bool {
-        targetApplication?.bundleIdentifier == "com.openai.codex"
-            && (text.contains("\n") || text.contains("\r"))
-    }
-
-    private static func replaceFocusedDraftUsingAXClearThenUnicodeTyping(
-        _ text: String,
-        in targetApplication: NSRunningApplication?
-    ) -> Bool {
-        guard let element = focusedEditableElement(in: targetApplication),
-              isAttributeSettable(kAXValueAttribute as String, on: element),
-              AXUIElementSetAttributeValue(
-                element,
-                kAXValueAttribute as CFString,
-                "" as CFTypeRef
-              ) == .success else {
-            return false
-        }
-
-        setInsertionPointToEnd(of: element, text: "")
-        targetApplication?.activate(options: [.activateIgnoringOtherApps])
-        guard postUnicodeText(text) else {
-            return false
-        }
-
-        repairInsertionPointToEndForTypedInsertion(of: element, text: text)
-        return true
-    }
-
     private static func bottomEditableInputFrame(in targetApplication: NSRunningApplication?) -> CGRect? {
         bottomEditableInputCandidate(in: targetApplication)?.frame
     }
@@ -415,7 +377,8 @@ final class FocusedTextInserter {
         guard visited < maxNodes else { return }
         visited += 1
 
-        if isEditableTextElement(element), let frame = frameAttribute(on: element),
+        if (isEditableTextElement(element) || isDraftWritableElement(element)),
+           let frame = frameAttribute(on: element),
            isLikelyBottomInputFrame(frame, in: windowFrame) {
             candidates.append(EditableInputCandidate(element: element, frame: frame))
         }
@@ -805,50 +768,6 @@ final class FocusedTextInserter {
         keyUp?.post(tap: .cghidEventTap)
     }
 
-    private static func postUnicodeText(_ text: String) -> Bool {
-        let source = CGEventSource(stateID: .hidSystemState)
-        for chunk in unicodeInputChunks(from: text) {
-            let utf16 = Array(chunk.utf16)
-            guard !utf16.isEmpty,
-                  let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
-                  let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else {
-                return false
-            }
-
-            keyDown.flags = []
-            keyUp.flags = []
-            utf16.withUnsafeBufferPointer { buffer in
-                keyDown.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: buffer.baseAddress)
-            }
-            keyDown.post(tap: .cghidEventTap)
-            keyUp.post(tap: .cghidEventTap)
-            Thread.sleep(forTimeInterval: 0.02)
-        }
-        return true
-    }
-
-    private static func unicodeInputChunks(from text: String, maxUTF16Units: Int = 2_048) -> [String] {
-        var chunks: [String] = []
-        var current = ""
-        var currentLength = 0
-
-        for character in text {
-            let fragment = String(character)
-            let fragmentLength = fragment.utf16.count
-            if currentLength > 0, currentLength + fragmentLength > maxUTF16Units {
-                chunks.append(current)
-                current = ""
-                currentLength = 0
-            }
-            current.append(fragment)
-            currentLength += fragmentLength
-        }
-
-        if !current.isEmpty {
-            chunks.append(current)
-        }
-        return chunks
-    }
 }
 
 private struct PasteboardSnapshot {
