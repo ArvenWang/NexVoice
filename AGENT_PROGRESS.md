@@ -68,6 +68,34 @@
   - `./scripts/build_app.sh release --embed-local-keys` 通过。
   - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过。
 
+## 本轮追加（2026-06-26：Codex 草稿读不到时使用短时本地缓存）
+
+- 用户复测反馈：
+  - 可编辑输入框内选中文字后语音不会进入划词问答，已确认 OK。
+  - 整体改写仍不触发：例如前文说“两个问题”，后文实际补到“三个问题”，NexVoice 没有回头修正前文。
+  - 结构化仍不触发；用户同意如果继续卡住，可降低优先级。
+- 日志定位：
+  - `DeepSeekRewrite.jsonl` 中最近几轮仍然是 `final_rewrite succeeded`，说明不是 Prompt 或 DeepSeek 服务失败。
+  - `ContinuousRewrite.jsonl` 在 `0.1.39` 后仍然全部是 `focusedDraftCharacters=0`、`insertionMode=insertAtCursor`。
+  - 手动检查 Codex AX 树后确认：当前 Codex 节点虽暴露 `AXValue`、`AXSelectedTextRange`、`AXNumberOfCharacters`，但实际 `AXValue` 为空、`AXNumberOfCharacters=0`，所以 AX 无法读回输入框草稿。
+- 本轮修复：
+  - 新增短时本地草稿缓存：NexVoice 成功写入 Codex 后，缓存自己刚写入的文本。
+  - 下一轮语音开始时，如果 AX 仍读不到 Codex 草稿，就用该缓存作为 `focusedDraft` 触发整体改写。
+  - 缓存仅限 `com.openai.codex`，并且只保留 60 秒；可编辑选区替换时会清空缓存，降低用户发送/清空后误合并旧内容的风险。
+  - 新增诊断方法名 `cachedPreviousInsertion`，方便复测时确认是否命中缓存。
+- 当前取舍：
+  - 这是针对 Codex 当前“不暴露草稿”的工程兜底，不依赖文案匹配、全选、粘贴或剪贴板盲探测。
+  - 风险是：如果用户在 60 秒内发送上一条消息后马上开始新一条，缓存可能仍保留旧草稿；后续可根据真实复测再缩短 TTL 或增加失效条件。
+- 版本递增：`0.1.39 (40)` -> `0.1.40 (41)`。
+- 当前测试版已构建并启动：
+  - 运行路径：`/Users/nefish/Desktop/Coding/NexVoice/dist/NexVoice.app`
+  - 运行 PID：`93274`
+  - 包内版本：`0.1.40 (41)`
+- 验证：
+  - `swift test` 通过，145 个测试。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过。
+
 ## 本轮追加（2026-06-26：可编辑选区替换与连续草稿读取兜底）
 
 - 用户复测反馈：

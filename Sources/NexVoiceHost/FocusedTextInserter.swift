@@ -14,6 +14,7 @@ enum FocusedTextAccessMethod: String {
     case axSetValue
     case axClearThenUnicodeTyping
     case keyboardInsert
+    case cachedPreviousInsertion
 }
 
 struct FocusedDraftSnapshot {

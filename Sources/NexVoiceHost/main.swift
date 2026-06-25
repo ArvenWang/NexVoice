@@ -10,6 +10,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let targetApplication: NSRunningApplication?
     }
 
+    private struct CachedFocusedDraft {
+        let processIdentifier: pid_t
+        let bundleIdentifier: String?
+        let text: String
+        let updatedAt: Date
+    }
+
+    private static let focusedDraftCacheTTL: TimeInterval = 60
+
     private var statusItem: NSStatusItem?
     private var shortcutMenuItem: NSMenuItem?
     private var shortcutSettingsMenuItem: NSMenuItem?
@@ -51,6 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var rewriteContextForCurrentSession: VoiceRewriteContext?
     private var focusedDraftForCurrentSession: String?
     private var focusedDraftReadMethodForCurrentSession: FocusedTextAccessMethod?
+    private var cachedFocusedDraft: CachedFocusedDraft?
     private var hasEditableSelectionForCurrentSession = false
     private var screenReplyCapturedContextForCurrentSession: ScreenReplyCapturedContext?
     private var pendingScreenReplyVoiceInstruction: String?
@@ -562,6 +572,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) {
             focusedDraftForCurrentSession = snapshot.text
             focusedDraftReadMethodForCurrentSession = snapshot.method
+        } else if selectedTextContextForCurrentSession?.text.isEmpty != false,
+                  let cachedDraft = cachedFocusedDraft(for: targetApplicationForCurrentSession) {
+            focusedDraftForCurrentSession = cachedDraft
+            focusedDraftReadMethodForCurrentSession = .cachedPreviousInsertion
         }
         let personalDictionary = VoicePersonalDictionaryStore.load()
         rewriteContextForCurrentSession = textInserter.rewriteContext(
@@ -819,6 +833,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         focusedDraftForCurrentSession = nil
         let draftReadMethod = focusedDraftReadMethodForCurrentSession
         focusedDraftReadMethodForCurrentSession = nil
+        let hadEditableSelection = hasEditableSelectionForCurrentSession
         hasEditableSelectionForCurrentSession = false
         latestRecoverableASRText = nil
         pendingFailedTranscriptionRetry = nil
@@ -830,6 +845,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .replaceFocusedDraft:
                 try textInserter.replaceFocusedDraft(text, into: targetApplication)
             }
+            updateCachedFocusedDraft(
+                insertedText: text,
+                targetApplication: targetApplication,
+                hadEditableSelection: hadEditableSelection
+            )
             Task {
                 await ContinuousRewriteDiagnosticsLogger.shared.log(
                     ContinuousRewriteDiagnosticEvent(
@@ -869,6 +889,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusItem?.button?.title = "NexVoice 出错"
             refreshMenuState()
         }
+    }
+
+    private func cachedFocusedDraft(for targetApplication: NSRunningApplication?) -> String? {
+        guard targetApplication?.bundleIdentifier == "com.openai.codex",
+              let targetApplication,
+              let cachedFocusedDraft,
+              cachedFocusedDraft.processIdentifier == targetApplication.processIdentifier,
+              cachedFocusedDraft.bundleIdentifier == targetApplication.bundleIdentifier,
+              Date().timeIntervalSince(cachedFocusedDraft.updatedAt) <= Self.focusedDraftCacheTTL else {
+            return nil
+        }
+        return cachedFocusedDraft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? nil
+            : cachedFocusedDraft.text
+    }
+
+    private func updateCachedFocusedDraft(
+        insertedText: String,
+        targetApplication: NSRunningApplication?,
+        hadEditableSelection: Bool
+    ) {
+        guard targetApplication?.bundleIdentifier == "com.openai.codex",
+              let targetApplication,
+              !hadEditableSelection else {
+            cachedFocusedDraft = nil
+            return
+        }
+        let trimmedText = insertedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty else {
+            cachedFocusedDraft = nil
+            return
+        }
+        cachedFocusedDraft = CachedFocusedDraft(
+            processIdentifier: targetApplication.processIdentifier,
+            bundleIdentifier: targetApplication.bundleIdentifier,
+            text: trimmedText,
+            updatedAt: Date()
+        )
     }
 
     private func schedulePostInsertionReadbackDiagnostic(
