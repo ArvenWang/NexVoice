@@ -14,8 +14,6 @@ enum FocusedTextAccessMethod: String {
     case axSetValue
     case axClearThenUnicodeTyping
     case keyboardInsert
-    case keyboardRangeReplace
-    case cachedPreviousInsertion
 }
 
 struct FocusedDraftSnapshot {
@@ -109,25 +107,6 @@ final class FocusedTextInserter {
         }
         latestInsertionMethod = nil
         throw FocusedTextInsertionError.focusedDraftReplacementUnsupported
-    }
-
-    func replaceCachedFocusedDraft(_ text: String, into targetApplication: NSRunningApplication?) throws {
-        let insertionText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !insertionText.isEmpty else { throw FocusedTextInsertionError.emptyText }
-        guard canPostKeyboardEvents else {
-            Self.requestAccessibilityPermission()
-            throw FocusedTextInsertionError.accessibilityPermissionRequired
-        }
-
-        targetApplication?.activate(options: [.activateIgnoringOtherApps])
-        Thread.sleep(forTimeInterval: 0.08)
-        Self.postShiftCommandUp()
-        Thread.sleep(forTimeInterval: 0.08)
-        guard Self.postUnicodeText(insertionText) else {
-            latestInsertionMethod = nil
-            throw FocusedTextInsertionError.focusedDraftReplacementUnsupported
-        }
-        latestInsertionMethod = .keyboardRangeReplace
     }
 
     func selectedText(in targetApplication: NSRunningApplication?) async -> String? {
@@ -231,14 +210,6 @@ final class FocusedTextInserter {
 
     private static func postCommandV() {
         postCommandKey(9)
-    }
-
-    private static func postCommandC() {
-        postCommandKey(8)
-    }
-
-    private static func postShiftCommandUp() {
-        postCommandKey(126, flags: [.maskCommand, .maskShift])
     }
 
     private static func hasEditableSelectedText(in targetApplication: NSRunningApplication?) -> Bool {
@@ -844,6 +815,8 @@ final class FocusedTextInserter {
                 return false
             }
 
+            keyDown.flags = []
+            keyUp.flags = []
             utf16.withUnsafeBufferPointer { buffer in
                 keyDown.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: buffer.baseAddress)
             }

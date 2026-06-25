@@ -13,6 +13,34 @@
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
+## 本轮追加（2026-06-26：撤销危险的 Codex 缓存键盘替换）
+
+- 用户复测反馈：
+  - 第二句语音时会触发截图快捷键，截图快捷键是 `Command+Alt+A`。
+  - 这是高风险问题，因为 NexVoice 不应该在语音输入过程中触发系统或其他 App 的快捷键。
+- 根因定位：
+  - 上一轮为了让 Codex 在 AX 读不到旧草稿时仍能“第二句回改第一句”，加入了 `keyboardRangeReplace` 兜底。
+  - 这条兜底会先模拟带 `Command` 的键盘选择动作，再通过 `virtualKey: 0` 发送 Unicode 文本；macOS 中 `virtualKey: 0` 对应 A 键。
+  - 如果系统或用户当前存在 `Option/Alt` 修饰键状态，就可能被组合成 `Command+Alt+A`，从而触发截图。这条方案本身不够安全，不能继续保留。
+- 本轮修复：
+  - 删除 `keyboardRangeReplace`、`replaceCachedFocusedDraft(...)` 和 `Command+Shift+Up` 选区替换路径。
+  - 删除 Codex 短时本地草稿缓存：现在不会再把上一轮写入的 Codex 文本存在 NexVoice 内部，也不会跨 App 带过去。
+  - `postUnicodeText(...)` 显式清空事件修饰键，降低 Unicode 直接输入时夹带 `Command/Option` 的风险。
+- 当前取舍：
+  - 安全优先：先停止所有“靠键盘快捷键选中旧内容再替换”的方案。
+  - 代价是：当 Codex 自身 AX 读不到输入框旧草稿时，第二句自动回改第一句的能力会退回到不可用；后续必须找不依赖全选、粘贴、快捷键模拟的安全读写方案。
+- 版本递增：`0.1.41 (42)` -> `0.1.42 (43)`。
+- 当前测试版已构建并启动：
+  - 运行路径：`/Users/nefish/Desktop/Coding/NexVoice/dist/NexVoice.app`
+  - 运行 PID：`22563`
+  - 包内版本：`0.1.42 (43)`
+- 验证：
+  - `swift test` 通过，145 个测试。
+  - `git diff --check` 通过。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过。
+  - 已检索确认 `keyboardRangeReplace`、`cachedPreviousInsertion`、`replaceCachedFocusedDraft`、`postShiftCommandUp`、`CachedFocusedDraft` 均已不存在。
+
 ## 本轮追加（2026-06-26：收紧输入模式与划词模式边界）
 
 - 用户复测反馈：
