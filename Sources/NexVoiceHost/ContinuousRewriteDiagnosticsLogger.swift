@@ -53,8 +53,21 @@ struct ContinuousRewriteDiagnosticEvent: Encodable {
     let focusedDraftCharacters: Int
     let newTranscriptCharacters: Int
     let insertionMode: String
+    let draftReadMethod: String?
+    let actualInsertionMethod: String?
     let focusedDraftPreview: String?
     let newTranscriptPreview: String?
+    let insertedTextCharacters: Int?
+    let insertedTextNewlineCount: Int?
+    let insertedTextBlankLineCount: Int?
+    let insertedTextContainsBlankLine: Bool?
+    let readbackAvailable: Bool?
+    let readbackMethod: String?
+    let readbackCharacters: Int?
+    let readbackNewlineCount: Int?
+    let readbackBlankLineCount: Int?
+    let readbackContainsBlankLine: Bool?
+    let readbackMatchesInsertedText: Bool?
 
     init(
         event: String,
@@ -63,7 +76,14 @@ struct ContinuousRewriteDiagnosticEvent: Encodable {
         hasEditableSelection: Bool,
         focusedDraft: String?,
         newTranscript: String,
-        insertionMode: VoiceContinuousRewriteInsertionMode
+        insertionMode: VoiceContinuousRewriteInsertionMode,
+        draftReadMethod: FocusedTextAccessMethod? = nil,
+        actualInsertionMethod: FocusedTextAccessMethod? = nil,
+        insertedText: String? = nil,
+        readbackText: String? = nil,
+        readbackMethod: FocusedTextAccessMethod? = nil,
+        expectedReadbackText: String? = nil,
+        includeTextPreviews: Bool = true
     ) {
         self.timestamp = ISO8601DateFormatter().string(from: Date())
         self.event = event
@@ -73,15 +93,67 @@ struct ContinuousRewriteDiagnosticEvent: Encodable {
         self.focusedDraftCharacters = focusedDraft?.count ?? 0
         self.newTranscriptCharacters = newTranscript.count
         self.insertionMode = String(describing: insertionMode)
-        self.focusedDraftPreview = focusedDraft.map { Self.preview($0) }
-        self.newTranscriptPreview = Self.preview(newTranscript)
+        self.draftReadMethod = draftReadMethod?.rawValue
+        self.actualInsertionMethod = actualInsertionMethod?.rawValue
+        self.focusedDraftPreview = includeTextPreviews ? focusedDraft.map { Self.preview($0) } : nil
+        self.newTranscriptPreview = includeTextPreviews ? Self.preview(newTranscript) : nil
+
+        let insertedStats = insertedText.map { Self.textStats($0) }
+        self.insertedTextCharacters = insertedStats?.characters
+        self.insertedTextNewlineCount = insertedStats?.newlineCount
+        self.insertedTextBlankLineCount = insertedStats?.blankLineCount
+        self.insertedTextContainsBlankLine = insertedStats?.containsBlankLine
+
+        let readbackStats = readbackText.map { Self.textStats($0) }
+        self.readbackAvailable = readbackText != nil
+        self.readbackMethod = readbackMethod?.rawValue
+        self.readbackCharacters = readbackStats?.characters
+        self.readbackNewlineCount = readbackStats?.newlineCount
+        self.readbackBlankLineCount = readbackStats?.blankLineCount
+        self.readbackContainsBlankLine = readbackStats?.containsBlankLine
+        if let readbackText, let expectedReadbackText {
+            self.readbackMatchesInsertedText = Self.normalize(readbackText) == Self.normalize(expectedReadbackText)
+        } else {
+            self.readbackMatchesInsertedText = nil
+        }
     }
 
     private static func preview(_ text: String, limit: Int = 360) -> String {
-        let normalized = text
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
+        let normalized = normalize(text)
         let prefix = String(normalized.prefix(limit))
         return normalized.count > limit ? prefix + "..." : prefix
+    }
+
+    private static func normalize(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func textStats(_ text: String) -> TextStats {
+        let normalized = normalize(text)
+        let newlineCount = normalized.filter { $0 == "\n" }.count
+        let blankLinePattern = #"\n[ \t]*\n"#
+        let blankLineCount = (try? NSRegularExpression(pattern: blankLinePattern))
+            .map {
+                $0.numberOfMatches(
+                    in: normalized,
+                    range: NSRange(normalized.startIndex..., in: normalized)
+                )
+            } ?? 0
+        return TextStats(
+            characters: normalized.count,
+            newlineCount: newlineCount,
+            blankLineCount: blankLineCount,
+            containsBlankLine: blankLineCount > 0
+        )
+    }
+
+    private struct TextStats {
+        let characters: Int
+        let newlineCount: Int
+        let blankLineCount: Int
+        let containsBlankLine: Bool
     }
 }

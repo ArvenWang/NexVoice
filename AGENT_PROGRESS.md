@@ -1,6 +1,6 @@
 # NexVoice 当前进展
 
-更新时间：2026-06-25
+更新时间：2026-06-26
 
 ## 当前状态
 
@@ -8,10 +8,294 @@
 - 项目形态：SwiftPM macOS 菜单栏 App，核心模块为 `NexVoiceCore`，宿主为 `NexVoiceHost`。
 - 默认入口：短按右 Alt 开始语音输入，再按一次结束；长按右 Alt 约 0.55 秒进入看屏自动回复；ESC 可取消录音、等待 final、AI 改写或看屏回复中的会话。
 - 当前主链路：腾讯云实时 ASR `16k_zh_en` -> DeepSeek `deepseek-v4-flash` 最终整理 -> 写入当前聚焦输入框。
-- 普通语音输入已增加第一版“基于输入框短草稿连续改写”：录音开始时读取当前输入框草稿，语音结束后把“已有草稿 + 本轮语音”交给 DeepSeek 输出完整新草稿，并在安全条件满足时替换当前输入框全文；空输入框、输入框内已有选区、超长草稿先降级为旧的光标粘贴/选区替换方式。
+- 普通语音输入已增加第一版“基于输入框短草稿连续改写”：录音开始时读取当前输入框草稿，语音结束后把“已有草稿 + 本轮语音”交给 DeepSeek 输出完整新草稿，并在安全条件满足时用非全选的 AX 写入替换当前输入框全文；空输入框、输入框内已有选区、超长草稿仍按光标位置普通插入。
 - 本地 SenseVoice Small 和 WhisperKit large-v3 保留为兜底和质量对照，不是当前默认主链路。
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
+
+## 本轮追加（2026-06-26：清理冗余并同步远端）
+
+- 用户复测结论：
+  - 上一版“第二句语音会全选上一句且不写入”的严重问题已经解决。
+  - Codex 连续改写的换行问题仍存在：当前非全选 `AXValue` 写入路径稳定，但在 Codex/Electron 中仍可能把真实换行压扁。
+- 清理：
+  - 删除已无调用的 `FocusedTextAccessMethod.keyboardDraftSnapshot`。
+  - 删除已无调用的 `postPlainKey(...)`。
+  - 删除已无调用的 `focusedTextPreview(from:)` 包装函数。
+  - 保留临时 `post_insert_readback` 诊断，因为换行问题仍未解决，还需要用它判断写入前后换行是否被压扁。
+- 当前取舍：
+  - 不恢复 `Command+A`、粘贴替换或 AX 全选替换；稳定输入优先。
+  - 换行问题留作下一轮专项：需要找一条非全选、非粘贴、能让 Codex 保留换行的写入方式。
+- 版本递增：`0.1.32 (33)` -> `0.1.33 (34)`。
+- 当前测试版已构建并启动：
+  - 运行路径：`/Users/nefish/Desktop/Coding/NexVoice/dist/NexVoice.app`
+  - 运行 PID：`39115`
+  - CDHash 前缀：`f313dd07fed4cae1fe89c614164cce1524482ad1`
+  - 签名时间：`2026-06-26 01:19:31`
+- 验证：
+  - `rg -n "keyboardDraftSnapshot|postPlainKey\\(|focusedTextPreview\\(from|axSelectedTextReplace|replaceFocusedDraftUsingAXSelectedText|keyboardReplace|postCommandA|Command\\+A" Sources Tests` 无结果。
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 通过。
+  - `swift test --disable-sandbox --quiet` 通过，145 个测试。
+  - `git diff --check` 通过。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=2 dist/NexVoice.app` 通过。
+  - 已确认包内版本为 `0.1.33 (34)`，`NexVoiceEmbeddedConfig/DeepSeek.json` 和 `TencentCloudASR.json` 存在。
+
+## 本轮追加（2026-06-26：撤回 AX 选区替换，恢复非全选稳定写入）
+
+- 用户明确反馈：
+  - 第二句语音时，上一句会被全选，但新内容没有写回输入框。
+  - 这比换行结构化更严重，必须先恢复稳定输入；不能再走任何全选或粘贴替换路径。
+- 日志定位：
+  - `ContinuousRewrite.jsonl` 显示第二句连续改写走了 `actualInsertionMethod=axSelectedTextReplace`。
+  - 写入文本有内容，但 `post_insert_readback` 仍读回旧文本，`readbackMatchesInsertedText=false`。
+  - 结论：`AXSelectedText` 替换在 Codex 输入框里会制造可见全选，但不能可靠写入，是失败路径。
+- 修复：
+  - 从 `FocusedTextInserter.replaceFocusedDraft(...)` 中移除 `axSelectedTextReplace` 分支。
+  - 删除 `replaceFocusedDraftUsingAXSelectedText(...)` 方法和 `FocusedTextAccessMethod.axSelectedTextReplace` 诊断枚举。
+  - 连续改写替换草稿现在只使用非选择式 `AXValue` 写入；写不进去就报“不支持安全替换已有草稿”，不会再尝试全选、粘贴或 AX 选区替换。
+  - 临时 `post_insert_readback` 诊断继续保留，用来确认后续是否写入成功、是否仍有换行被压扁。
+- 当前取舍：
+  - 这次优先解决“第二句不写入、上一句被全选”的稳定性问题。
+  - 连续改写里 Codex/Electron `AXValue` 可能仍会压扁换行；这个问题保留为下一步寻找第三条“非全选、非粘贴”的写入路径。
+- 版本递增：`0.1.31 (32)` -> `0.1.32 (33)`。
+- 当前测试版已构建并启动：
+  - 运行路径：`/Users/nefish/Desktop/Coding/NexVoice/dist/NexVoice.app`
+  - 运行 PID：`27315`
+  - CDHash 前缀：`1ba02069a204799315b02673122f93495de84657`
+  - 签名时间：`2026-06-26 01:14:16`
+- 验证：
+  - `rg -n "axSelectedTextReplace|replaceFocusedDraftUsingAXSelectedText|keyboardReplace|postCommandA|Command\\+A" Sources Tests` 无结果。
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 已通过。
+  - `swift test --disable-sandbox --quiet` 通过，145 个测试。
+  - `git diff --check` 通过。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=2 dist/NexVoice.app` 通过。
+  - 已确认包内版本为 `0.1.32 (33)`，`NexVoiceEmbeddedConfig/DeepSeek.json` 和 `TencentCloudASR.json` 存在。
+
+## 本轮追加（2026-06-26：Codex 连续改写换行丢失修复）
+
+- 用户复测三次语音后反馈：
+  - 第一次空输入框发言时，DeepSeek 输出能分段，Codex 里也能看到分段。
+  - 第二次、第三次基于已有草稿继续发言后，结构重新整理成了没有换行的版本。
+- 新增临时读回诊断已定位根因：
+  - 第一次是空输入框 `insertAtCursor`，实际写入方式 `keyboardInsert`；DeepSeek 输出有换行，写后读回仍至少保留 1 个换行，所以 Codex 中可见分段。
+  - 第二次、第三次是连续改写 `replaceFocusedDraft`，实际写入方式 `axSetValue`；DeepSeek 输出有真实换行，但写后读回 `readbackNewlineCount=0`，说明 Codex 的 AX 全文写入路径会吞掉换行。
+  - 因此这次不是 DeepSeek 结构化失败，而是 Codex/Electron 的 AX `kAXValue` 替换草稿时把换行压扁。
+- 修复：
+  - `FocusedTextInserter.replaceFocusedDraft(...)` 新增窄范围策略：仅当目标 App 是 `com.openai.codex` 且待写入文本包含换行时，跳过 `AXValue` 全文写入，改走现有 `Command+A` + `Command+V` 键盘替换兜底。
+  - 不改变其他 App 的默认 AX 写入策略，避免影响原生输入框和其他应用。
+  - 连续改写 Prompt 补充一句：已有分行或编号结构必须继续使用真实换行，每个编号项、问题项或段落单独成行，不要压成同一行。
+  - 更新 `VoiceContinuousRewritePolicyTests`，锁定连续改写 Prompt 中的真实换行约束。
+- 版本递增：`0.1.29 (30)` -> `0.1.30 (31)`。
+- 当前测试版已构建并启动：
+  - 运行路径：`/Users/nefish/Desktop/Coding/NexVoice/dist/NexVoice.app`
+  - 运行 PID：`99676`
+  - CDHash 前缀：`a85153555c28be27f69971b6e8aaaea8bb97e2d3`
+  - 签名时间：`2026-06-26 00:56:52`
+- 验证：
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 通过。
+  - `swift test --disable-sandbox --quiet` 通过，145 个测试。
+  - `git diff --check` 通过。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=2 dist/NexVoice.app` 通过。
+  - 已确认包内版本为 `0.1.30 (31)`，`NexVoiceEmbeddedConfig/DeepSeek.json` 和 `TencentCloudASR.json` 存在。
+- 下一轮复测重点：
+  - 在 Codex 中按同样方式连续说三次，第二次和第三次应不再被压成无换行的一整段。
+  - 复测后查看 `ContinuousRewrite.jsonl`：包含换行文本的 Codex 连续改写应出现 `actualInsertionMethod=keyboardReplace`，`post_insert_readback.readbackNewlineCount` 应大于 0。
+  - 临时 `post_insert_readback` 诊断仍保留，确认稳定后应删除。
+
+## 本轮追加（2026-06-26：临时结构化写后读回诊断）
+
+- 用户要求先把结构化问题搞清楚，并确认新增诊断应是临时方案。
+- 已新增临时诊断，不改变主功能策略：
+  - `ContinuousRewriteDiagnosticEvent` 增加写入文本统计字段：`insertedTextCharacters`、`insertedTextNewlineCount`、`insertedTextBlankLineCount`、`insertedTextContainsBlankLine`。
+  - 插入成功后延迟 350ms 再读当前输入框，新增 `post_insert_readback` 日志事件，记录 `readbackAvailable`、`readbackMethod`、`readbackCharacters`、`readbackNewlineCount`、`readbackBlankLineCount`、`readbackContainsBlankLine`、`readbackMatchesInsertedText`。
+  - `post_insert_readback` 不记录正文 preview，只记录统计值，避免为临时诊断额外扩大日志正文暴露面。
+  - 代码注释明确这是临时诊断：确认 Codex / Electron 是否保留段落换行后应删除。
+- 下一次用户复测后判断方式：
+  - 如果 `insertedTextContainsBlankLine=true` 且 `readbackContainsBlankLine=true`，说明 NexVoice 写入和 Codex 存储都保留空行，截图只是视觉上不明显。
+  - 如果 `insertedTextContainsBlankLine=true` 但 `readbackContainsBlankLine=false`，说明 Codex/AX 写入后压扁了空行，需要改写入方式。
+  - 如果 `readbackAvailable=false`，说明写后读回拿不到输入框内容，需要继续做 Codex 专项读回验证。
+- 版本递增：`0.1.28 (29)` -> `0.1.29 (30)`。
+- 当前测试版已构建并启动：
+  - 运行路径：`/Users/nefish/Desktop/Coding/NexVoice/dist/NexVoice.app`
+  - 运行 PID：`81662`
+  - CDHash 前缀：`be3c80081c479d3340ae27538046ab944d38463a`
+  - 签名时间：`2026-06-26 00:50:55`
+- 验证：
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 通过。
+  - `swift test --disable-sandbox --quiet` 通过，145 个测试。
+  - `git diff --check` 通过。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=2 dist/NexVoice.app` 通过。
+  - 已确认包内版本为 `0.1.29 (30)`，`NexVoiceEmbeddedConfig/DeepSeek.json` 和 `TencentCloudASR.json` 存在。
+
+## 本轮追加（2026-06-26：结构化日志对比与腾讯云 ASR 参数评估）
+
+- 用户用截图复测“两个问题”的连续改写效果，怀疑结构化没有生效，或在 Codex 输入框中被渲染成一整段。
+- 结构化诊断结论：
+  - `DeepSeekRewrite.jsonl` 中 2026-06-25T16:21:22Z 对应请求 `BEC24687-0BEB-4244-9576-5808E822FD1C` 是成功请求，非 timeout / fallback。
+  - DeepSeek 输出本身包含空行分段：开头一句“再试一次。这次也是两个问题。”，随后分别是“第一个问题...”和“第二个问题...”两段。
+  - 截图中看起来像一整块，主要是 Codex 输入框视觉样式不显示明显段间距；同时 `ContinuousRewrite.jsonl` 的 preview 会把换行显示成空格，不能单独作为结构化判断依据。
+  - 判断结构化是否真的生效，应以 `DeepSeekRewrite.jsonl` 的 `outputPreview` 为准；`ContinuousRewrite.jsonl` 主要用于判断是否读到草稿、采用插入还是替换、实际写入方式。
+- 腾讯云 ASR 当前代码配置：
+  - 当前使用普通实时 ASR `16k_zh_en`，PCM、16k、单声道、40ms 分片上传。
+  - 已开启 `needvad=1`，`vad_silence_time=800`，`max_speak_time=90000`，`filter_empty_result=1`，临时热词 `hotword_list` 按个人词库传入。
+  - 目前没有暴露 `noise_threshold`、`sentence_strategy`、`filter_modal`、`hotword_id`、`customization_id`、`replace_text_id`，也没有本地麦克风增益、降噪、回声消除或声纹过滤。
+- 官方参数评估：
+  - `noise_threshold` 可作为轻量噪声门限试验项，取值越大越容易判为噪音，但官方提示慎用，可能误伤小声说话。
+  - `filter_modal` 过滤语气词，能减少“呃、嗯、啊”，但不能解决旁人说话混入。
+  - `sentence_strategy=1` 可让分句更像小段落，对最终文本结构可能有帮助，但不是降噪能力。
+  - 普通实时 ASR 没看到“只识别指定声纹”的参数；腾讯云另有“实时说话人分离”接口 `16k_zh_en_speaker`，能返回 speaker_id，但本质是区分多人，不等于天然只收用户本人。
+- 推荐后续方案：
+  - 低风险一：把 `noise_threshold` 做成可配置实验项，先小范围测试 `0.5 / 1.0`，避免直接强行上线高阈值。
+  - 低风险二：把当前 ASR 参数写入日志更完整，增加 `noise_threshold`、`filter_modal`、`sentence_strategy` 字段，方便实测归因。
+  - 中风险：新增“说话人分离模式”，接腾讯云 speaker 接口，先观察 speaker_id 是否稳定，再考虑只保留目标 speaker 的文本。
+  - 高风险：真正的“只认我的声音”需要本地声纹注册 + 说话人验证 / 前置音频门控，复杂度明显高于普通参数调优，应作为二期能力。
+
+## 本轮追加（2026-06-26：禁止非输入框全选与结构化超时修复）
+
+- 用户反馈三个问题：
+  - 严重问题：在非输入框区域按右 Alt 会触发全选，网页选中文字后也会变成整页全选。
+  - Codex 专项兜底匹配是否过度复杂。
+  - 连续改写看起来没有做全局结构化，只是在一整段里改字句。
+- 根因：
+  - 为了兼容 Codex 早期 AX 读不到输入框草稿，`focusedDraftSnapshotResult(...)` 在 AX 读不到草稿时用了 `Command+A / Command+C` 作为键盘兜底读取；这个兜底没有严格证明当前焦点是输入框，所以在网页、普通页面、非输入区域会把整页选中。
+  - 最近一次结构化失败从 `DeepSeekRewrite.jsonl` 可以确认不是 prompt 没触发，而是连续改写请求在 12 秒超时，随后降级为只插入本轮 ASR fallback，因此表现成“没有全局结构化”。
+- 修复：
+  - 完全移除录音开始阶段的 `Command+A / Command+C` 草稿读取兜底；现在读取已有草稿只走 AX 直接读取路径，读不到就当作空草稿。
+  - 保留写入阶段的 `Command+A / Command+V` 兜底，因为它只会在已确认要替换输入框草稿时执行，不会在录音开始时误全选网页。
+  - 连续改写长草稿 / 碎片化语音 timeout 放宽：碎片化或 260 字以上给到 `16s`，160 字以上给到 `14s`，降低长草稿结构化超时概率。
+  - 连续改写 prompt 增加明确要求：多个问题、要求、原因、方案或待办要用空行分段，不要压成一个长段。
+  - 同步更新 `VoiceRewriteContextTests` 的 timeout 期望。
+- 关于 Codex 专项兜底的当前判断：
+  - 通用方案仍是 AX placeholder/title/description 过滤；Codex 固定文案过滤只是兜底。
+  - 但用户提出“是否过度复杂”是合理的，后续如果 AX label 过滤稳定，可以考虑移除固定文案兜底，避免产品逻辑被某个引导语绑定。
+- 版本递增：`0.1.27 (28)` -> `0.1.28 (29)`。
+- 当前测试版已构建并启动：
+  - 运行路径：`/Users/nefish/Desktop/Coding/NexVoice/dist/NexVoice.app`
+  - 运行 PID：`12117`
+  - CDHash 前缀：`193b2d9f6e601e0f21713c02083961e8718d817d`
+  - 签名时间：`2026-06-26 00:03`
+- 验证：
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 通过。
+  - `swift test --disable-sandbox --quiet` 通过，145 个测试。
+  - `git diff --check` 通过。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=2 dist/NexVoice.app` 通过。
+  - 已确认包内版本为 `0.1.28 (29)`，`NexVoiceEmbeddedConfig/DeepSeek.json` 和 `TencentCloudASR.json` 存在。
+- 下一轮复测重点：
+  - 在网页、非输入框区域、普通选中文本区域按右 Alt，不应再触发整页全选。
+  - Codex 连续改写长草稿应更少超时；如果仍超时，日志 `DeepSeekRewrite.jsonl` 会显示 `failed / The request timed out`。
+  - 多问题连续改写应输出空行分隔的段落结构，而不是只在一段里写“第几个问题”。
+
+## 本轮追加（2026-06-25：placeholder 过滤解释与短延迟光标补位）
+
+- 用户追问三点：placeholder 是否只靠固定文案匹配、连续改写读写策略是否只针对 Codex、以及第二次连续改写后光标仍可能回到开头。
+- 当前逻辑澄清：
+  - 连续改写主体是通用能力，优先用 macOS Accessibility 读取/写入输入框；无法直接读写时才回退剪贴板和键盘事件。
+  - App 专项逻辑按 bundle ID 隔离；Codex 专项 placeholder 过滤只作用于 `com.openai.codex`，不会影响微信、飞书、浏览器等其他 App。
+  - 精确文案过滤只是 Codex 的兜底，不是首选方案。
+- 修复：
+  - placeholder 过滤继续优先使用通用 AX 属性：`AXPlaceholderValue`。
+  - Codex 场景新增 label 过滤：如果读到的文本等于 AX 元素的 `AXDescription` / `AXTitle` / `AXHelp`，也视为非用户草稿，减少对“要求后续变更”固定文案的依赖。
+  - 仍保留 `要求后续变更` 精确过滤作为最后兜底，用于 Codex 没有把 placeholder 正确暴露成 AX placeholder/title/description 的情况。
+  - 光标补位从“只设置一次”改为“立即设置 + 30ms 后短补一次”；不再使用 50ms/160ms 长延迟，也不再发送 `Command+Down`，降低用户手动移动光标后被拉回的风险。
+- 版本递增：`0.1.26 (27)` -> `0.1.27 (28)`。
+- 当前测试版已构建并启动：
+  - 运行路径：`/Users/nefish/Desktop/Coding/NexVoice/dist/NexVoice.app`
+  - 运行 PID：`83353`
+  - CDHash 前缀：`93e1f60937c9f6f17469c130c88d9bc907178168`
+  - 签名时间：`2026-06-25 23:46`
+- 验证：
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 通过。
+  - `swift test --disable-sandbox --quiet` 通过，145 个测试。
+  - `git diff --check` 通过。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=2 dist/NexVoice.app` 通过。
+  - 已确认包内版本为 `0.1.27 (28)`，`NexVoiceEmbeddedConfig/DeepSeek.json` 和 `TencentCloudASR.json` 存在。
+- 下一轮复测重点：
+  - Codex 空输入框不应把 placeholder 纳入正文。
+  - 连续改写第二次、第三次后光标应尽量留在文末；用户在完成后手动移动光标，不应再被长延迟拉回。
+  - 如果 Codex 后续换引导语，优先观察日志中是否仍 `focusedDraftCharacters=0`；如果失败，说明 Codex 没把新引导语暴露在 AX label/placeholder，需要继续补 Codex 专项兜底。
+
+## 本轮追加（2026-06-25：光标回拉弱化与 Codex placeholder 过滤）
+
+- 用户在 Codex 测试反馈两个问题：
+  - 上一版为了修复光标回到开头，延迟多次把光标拉到末尾，导致用户手动把光标挪到前面后仍被强行拉回末尾。
+  - Codex 空输入框里的灰色提示文案“要求后续变更”被读成真实草稿，导致空输入框也进入连续改写。
+- 修复：
+  - 移除 `50ms / 160ms` 延迟重复拉光标和 `Command+Down` 兜底；AX 直接写入后只做一次默认文末光标设置，不再持续干预用户后续手动移动光标。
+  - 草稿读取新增 placeholder 过滤：如果 AX 元素提供 `AXPlaceholderValue` 且读到的文本与 placeholder 一致，视为空草稿。
+  - 针对 Codex bundle `com.openai.codex` 增加已知非草稿 placeholder 过滤：读到纯 `要求后续变更` 时视为空输入框；该过滤同时作用于连续改写草稿读取和 `VoiceRewriteContext.focusedTextPreview`。
+  - 键盘兜底 `Command+A / Command+C` 读到纯 Codex placeholder 时也会丢弃，避免 placeholder 从兜底路径进入 prompt。
+- 版本递增：`0.1.25 (26)` -> `0.1.26 (27)`。
+- 当前测试版已构建并启动：
+  - 运行路径：`/Users/nefish/Desktop/Coding/NexVoice/dist/NexVoice.app`
+  - 运行 PID：`71819`
+  - CDHash 前缀：`4361e5f1390ef9574052268dffaa77eae699f34d`
+  - 签名时间：`2026-06-25 23:40`
+- 验证：
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 通过。
+  - `swift test --disable-sandbox --quiet` 通过，145 个测试。
+  - `git diff --check` 通过。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=2 dist/NexVoice.app` 通过。
+  - 已确认包内版本为 `0.1.26 (27)`，`NexVoiceEmbeddedConfig/DeepSeek.json` 和 `TencentCloudASR.json` 存在。
+- 下一轮复测重点：
+  - Codex 空输入框只显示灰色“要求后续变更”时，说话后应按空草稿处理，不应把这句 placeholder 纳入输出。
+  - 连续改写完成后默认光标尽量在文末；如果用户随后手动移动光标，App 不应再把光标强行拉回末尾。
+
+## 本轮追加（2026-06-25：连续改写后光标位置修复）
+
+- 用户在 Codex 输入框测试确认连续改写已能无感合成整理，但每次写入后光标会回到文本开头，而不是停在文末。
+- 修复：`FocusedTextInserter.replaceFocusedDraft(...)` 的 AX 直接写入路径现在会在写入后修复光标位置：
+  - 写入前先激活目标 App，确保后续光标修复作用在同一个输入框。
+  - `AXUIElementSetAttributeValue(kAXValueAttribute, ...)` 写入成功后，立即把 `AXSelectedTextRange` 设置到文末。
+  - 针对 Electron / WebView 可能异步把 selection 重置到开头的问题，延迟 `50ms` 和 `160ms` 再次把光标设置到文末。
+  - 如果目标输入框不支持 AX selection 设置，则轻量兜底发送一次 `Command+Down`，把光标移到文本末尾；不再重新全选或重贴文本。
+- 版本递增：`0.1.24 (25)` -> `0.1.25 (26)`。
+- 当前测试版已构建并启动：
+  - 运行路径：`/Users/nefish/Desktop/Coding/NexVoice/dist/NexVoice.app`
+  - 运行 PID：`52074`
+  - CDHash 前缀：`7f73a63c1c88503f7dcde6eef5b15c5c5b512431`
+  - 签名时间：`2026-06-25 23:27`
+- 验证：
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 通过。
+  - `swift test --disable-sandbox --quiet` 通过，145 个测试。
+  - `git diff --check` 通过。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=2 dist/NexVoice.app` 通过。
+  - 已确认包内版本为 `0.1.25 (26)`，`NexVoiceEmbeddedConfig/DeepSeek.json` 和 `TencentCloudASR.json` 存在。
+- 下一轮复测重点：继续在 Codex 输入框连续说 2-3 次，确认改写后光标停在文本末尾，可以直接接着输入或继续语音追加。
+
+## 本轮追加（2026-06-25：连续改写无感读写优先与版本修正）
+
+- 版本号已补齐：`0.1.23 (24)` -> `0.1.24 (25)`，避免连续改写新功能仍沿用旧版本号。
+- 连续改写读写路径改为分层策略：
+  - 读取输入框草稿时优先用 AX 直接读取 `AXValue`，读不到时尝试 `AXStringForRange`，最后才回退到 `Command+A / Command+C` 键盘兜底。
+  - 替换输入框草稿时优先用 `AXUIElementSetAttributeValue(kAXValueAttribute, ...)` 直接写入，并尽量把光标放到文末；不支持直接写入时才回退到旧的 `Command+A / Command+V`。
+  - 普通空输入框插入仍走原来的剪贴板粘贴，不改变旧路径。
+- `ContinuousRewrite.jsonl` 诊断增强：
+  - `decision` 事件新增 `draftReadMethod`，可看到草稿来自 `axValue`、`axStringForRange` 还是 `keyboardDraftSnapshot`。
+  - `inserted` 事件新增 `actualInsertionMethod`，可看到最终是 `axSetValue`、`keyboardReplace` 还是 `keyboardInsert`。
+- 当前测试版已构建并启动：
+  - 运行路径：`/Users/nefish/Desktop/Coding/NexVoice/dist/NexVoice.app`
+  - 运行 PID：`43323`
+  - Bundle ID：`com.nexvoice.mac`
+  - CDHash 前缀：`2d061969d50d7a2f2add43f5941acaaadf83a63f`
+  - 签名时间：`2026-06-25 23:22`
+- 验证：
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 通过。
+  - `swift test --disable-sandbox --quiet` 通过，145 个测试。
+  - `git diff --check` 通过。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=2 dist/NexVoice.app` 通过。
+  - 已确认包内版本为 `0.1.24 (25)`，`NexVoiceEmbeddedConfig/DeepSeek.json` 和 `TencentCloudASR.json` 存在。
+- 下一轮复测重点：
+  - 在 Codex、微信、飞书里用同一输入框连续说 2-3 次，观察是否合并成一版完整新草稿。
+  - 测试后查看 `~/Library/Application Support/NexVoice/Logs/ContinuousRewrite.jsonl`：原生输入框理想结果应尽量出现 `draftReadMethod=axValue` 和 `actualInsertionMethod=axSetValue`；Electron / WebView 如果仍显示键盘兜底，说明对应 App 的 AX 能力不足，需要再专项做 Electron / 浏览器适配。
 
 ## 本轮追加（2026-06-25：输入框短草稿连续改写可行性）
 

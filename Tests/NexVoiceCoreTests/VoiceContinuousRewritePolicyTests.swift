@@ -65,4 +65,6 @@ import Testing
     #expect(prompt.contains("连续改写"))
     #expect(prompt.contains("输出一版完整的新草稿"))
     #expect(prompt.contains("不要只改写本轮新增语音"))
+    #expect(prompt.contains("必须继续使用真实换行"))
+    #expect(prompt.contains("每个编号项、问题项或段落单独成行"))
 }

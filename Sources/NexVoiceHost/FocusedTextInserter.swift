@@ -8,10 +8,23 @@ struct SelectedTextContext {
     let anchorRect: CGRect
 }
 
+enum FocusedTextAccessMethod: String {
+    case axValue
+    case axStringForRange
+    case axSetValue
+    case keyboardInsert
+}
+
+struct FocusedDraftSnapshot {
+    let text: String
+    let method: FocusedTextAccessMethod
+}
+
 enum FocusedTextInsertionError: LocalizedError {
     case emptyText
     case accessibilityPermissionRequired
     case pasteboardWriteFailed
+    case focusedDraftReplacementUnsupported
 
     var errorDescription: String? {
         switch self {
@@ -21,6 +34,8 @@ enum FocusedTextInsertionError: LocalizedError {
             return "需要辅助功能权限，才能把文字输入到当前文本框。"
         case .pasteboardWriteFailed:
             return "写入系统剪贴板失败。"
+        case .focusedDraftReplacementUnsupported:
+            return "当前输入框不支持安全替换已有草稿。"
         }
     }
 }
@@ -29,6 +44,8 @@ enum FocusedTextInsertionError: LocalizedError {
 final class FocusedTextInserter {
     private let pasteboard: NSPasteboard
     private var restoreWorkItem: DispatchWorkItem?
+    private(set) var latestDraftReadMethod: FocusedTextAccessMethod?
+    private(set) var latestInsertionMethod: FocusedTextAccessMethod?
 
     init(pasteboard: NSPasteboard = .general) {
         self.pasteboard = pasteboard
@@ -47,6 +64,7 @@ final class FocusedTextInserter {
         }
 
         restoreWorkItem?.cancel()
+        latestInsertionMethod = .keyboardInsert
         let snapshot = PasteboardSnapshot(pasteboard: pasteboard)
 
         pasteboard.clearContents()
@@ -76,30 +94,13 @@ final class FocusedTextInserter {
             Self.requestAccessibilityPermission()
             throw FocusedTextInsertionError.accessibilityPermissionRequired
         }
-        restoreWorkItem?.cancel()
-        let snapshot = PasteboardSnapshot(pasteboard: pasteboard)
-
-        pasteboard.clearContents()
-        guard pasteboard.setString(insertionText, forType: .string) else {
-            throw FocusedTextInsertionError.pasteboardWriteFailed
-        }
-
-        let insertionChangeCount = pasteboard.changeCount
         targetApplication?.activate(options: [.activateIgnoringOtherApps])
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-            Self.postCommandA()
+        if Self.replaceFocusedDraftUsingAXValue(insertionText, in: targetApplication) {
+            latestInsertionMethod = .axSetValue
+            return
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
-            Self.postCommandV()
-        }
-
-        let restoreWorkItem = DispatchWorkItem { [weak self] in
-            guard let self, self.pasteboard.changeCount == insertionChangeCount else { return }
-            snapshot.restore(to: self.pasteboard)
-        }
-        self.restoreWorkItem = restoreWorkItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4, execute: restoreWorkItem)
+        latestInsertionMethod = nil
+        throw FocusedTextInsertionError.focusedDraftReplacementUnsupported
     }
 
     func selectedText(in targetApplication: NSRunningApplication?) async -> String? {
@@ -147,7 +148,10 @@ final class FocusedTextInserter {
                 Self.stringAttribute(kAXDescriptionAttribute as String, on: element)
                     ?? Self.stringAttribute(kAXTitleAttribute as String, on: element)
             }.first,
-            focusedTextPreview: Self.focusedTextPreview(from: elementChain),
+            focusedTextPreview: Self.focusedTextSnapshot(
+                from: elementChain,
+                targetApplication: targetApplication
+            )?.text,
             selectedTextMode: selectedTextMode,
             personalDictionary: personalDictionary
         )
@@ -156,39 +160,25 @@ final class FocusedTextInserter {
     func focusedTextPreview(in targetApplication: NSRunningApplication?) -> String? {
         let focusedElement = Self.focusedElement(in: targetApplication) ?? Self.systemFocusedElement()
         let elementChain = focusedElement.map { Self.elementAndParents(from: $0, maxDepth: 4) } ?? []
-        return Self.focusedTextPreview(from: elementChain)
+        return Self.focusedTextSnapshot(from: elementChain, targetApplication: targetApplication)?.text
     }
 
     func focusedDraftSnapshot(in targetApplication: NSRunningApplication?) async -> String? {
-        if let focusedText = focusedTextPreview(in: targetApplication),
-           !focusedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return focusedText
-        }
-        guard canPostKeyboardEvents,
-              targetApplication != nil else {
-            return nil
-        }
+        await focusedDraftSnapshotResult(in: targetApplication)?.text
+    }
 
-        restoreWorkItem?.cancel()
-        let snapshot = PasteboardSnapshot(pasteboard: pasteboard)
-        pasteboard.clearContents()
-        let baselineChangeCount = pasteboard.changeCount
-
-        targetApplication?.activate(options: [.activateIgnoringOtherApps])
-        try? await Task.sleep(nanoseconds: 80_000_000)
-        Self.postCommandA()
-        try? await Task.sleep(nanoseconds: 80_000_000)
-        Self.postCommandC()
-        try? await Task.sleep(nanoseconds: 180_000_000)
-
-        let copiedText = pasteboard.changeCount != baselineChangeCount
-            ? pasteboard.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            : nil
-        snapshot.restore(to: pasteboard)
-        if copiedText?.isEmpty == false {
-            Self.postPlainKey(124)
+    func focusedDraftSnapshotResult(in targetApplication: NSRunningApplication?) async -> FocusedDraftSnapshot? {
+        latestDraftReadMethod = nil
+        let focusedElement = Self.focusedElement(in: targetApplication) ?? Self.systemFocusedElement()
+        let elementChain = focusedElement.map { Self.elementAndParents(from: $0, maxDepth: 4) } ?? []
+        if let snapshot = Self.focusedTextSnapshot(
+            from: elementChain,
+            targetApplication: targetApplication
+        ) {
+            latestDraftReadMethod = snapshot.method
+            return snapshot
         }
-        return copiedText?.isEmpty == false ? copiedText : nil
+        return nil
     }
 
     func hasEditableSelection(in targetApplication: NSRunningApplication?) -> Bool {
@@ -221,20 +211,8 @@ final class FocusedTextInserter {
         postCommandKey(9)
     }
 
-    private static func postCommandA() {
-        postCommandKey(0)
-    }
-
     private static func postCommandC() {
         postCommandKey(8)
-    }
-
-    private static func postPlainKey(_ keyCode: CGKeyCode) {
-        let source = CGEventSource(stateID: .hidSystemState)
-        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true)
-        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false)
-        keyDown?.post(tap: .cghidEventTap)
-        keyUp?.post(tap: .cghidEventTap)
     }
 
     private static func hasEditableSelectedText(in targetApplication: NSRunningApplication?) -> Bool {
@@ -265,6 +243,27 @@ final class FocusedTextInserter {
         let focusedElement = focusedElement(in: targetApplication) ?? systemFocusedElement()
         let elementChain = focusedElement.map { elementAndParents(from: $0, maxDepth: 4) } ?? []
         return elementChain.first(where: isEditableTextElement)
+    }
+
+    private static func replaceFocusedDraftUsingAXValue(
+        _ text: String,
+        in targetApplication: NSRunningApplication?
+    ) -> Bool {
+        guard let element = focusedEditableElement(in: targetApplication),
+              isAttributeSettable(kAXValueAttribute as String, on: element) else {
+            return false
+        }
+
+        guard AXUIElementSetAttributeValue(
+            element,
+            kAXValueAttribute as CFString,
+            text as CFTypeRef
+        ) == .success else {
+            return false
+        }
+
+        repairInsertionPointToEndOnce(of: element, text: text)
+        return true
     }
 
     private static func bottomEditableInputFrame(in targetApplication: NSRunningApplication?) -> CGRect? {
@@ -393,18 +392,99 @@ final class FocusedTextInserter {
         return ranges.compactMap { range(from: $0) }.map(\.length).reduce(0, +)
     }
 
-    private static func focusedTextPreview(from elements: [AXUIElement]) -> String? {
+    private static func focusedTextSnapshot(
+        from elements: [AXUIElement],
+        targetApplication: NSRunningApplication?
+    ) -> FocusedDraftSnapshot? {
         for element in elements where isEditableTextElement(element) {
             if let selectedText = stringAttribute(kAXSelectedTextAttribute as String, on: element),
-               !selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return selectedText
+               isRealFocusedDraft(selectedText, on: element, targetApplication: targetApplication) {
+                return FocusedDraftSnapshot(text: selectedText, method: .axValue)
             }
             if let value = stringAttribute(kAXValueAttribute as String, on: element),
-               !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return value
+               isRealFocusedDraft(value, on: element, targetApplication: targetApplication) {
+                return FocusedDraftSnapshot(text: value, method: .axValue)
+            }
+            if let text = stringForFullRange(on: element),
+               isRealFocusedDraft(text, on: element, targetApplication: targetApplication) {
+                return FocusedDraftSnapshot(text: text, method: .axStringForRange)
             }
         }
         return nil
+    }
+
+    private static func isRealFocusedDraft(
+        _ text: String,
+        on element: AXUIElement,
+        targetApplication: NSRunningApplication?
+    ) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+
+        if let placeholder = stringAttribute("AXPlaceholderValue", on: element)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !placeholder.isEmpty,
+           trimmed == placeholder {
+            return false
+        }
+
+        if targetApplication?.bundleIdentifier == "com.openai.codex" {
+            let nonDraftLabels = [
+                stringAttribute(kAXDescriptionAttribute as String, on: element),
+                stringAttribute(kAXTitleAttribute as String, on: element),
+                stringAttribute(kAXHelpAttribute as String, on: element)
+            ]
+                .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            if nonDraftLabels.contains(trimmed) {
+                return false
+            }
+        }
+
+        return !isKnownNonDraftPlaceholder(trimmed, targetApplication: targetApplication)
+    }
+
+    private static func isKnownNonDraftPlaceholder(
+        _ text: String,
+        targetApplication: NSRunningApplication?
+    ) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return true }
+        guard targetApplication?.bundleIdentifier == "com.openai.codex" else { return false }
+        return codexNonDraftPlaceholderTexts.contains(trimmed)
+    }
+
+    private static let codexNonDraftPlaceholderTexts: Set<String> = [
+        "要求后续变更"
+    ]
+
+    private static func stringForFullRange(on element: AXUIElement) -> String? {
+        let characterCount = integerAttribute("AXNumberOfCharacters", on: element)
+        let fullRange: CFRange
+        if let characterCount, characterCount > 0 {
+            fullRange = CFRange(location: 0, length: characterCount)
+        } else if let visibleRange = rangeAttribute("AXVisibleCharacterRange", on: element),
+                  visibleRange.length > 0 {
+            fullRange = visibleRange
+        } else {
+            return nil
+        }
+
+        var range = fullRange
+        guard let rangeValue = AXValueCreate(.cfRange, &range) else {
+            return nil
+        }
+
+        var object: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(
+            element,
+            "AXStringForRange" as CFString,
+            rangeValue,
+            &object
+        ) == .success else {
+            return nil
+        }
+        return object as? String
     }
 
     private static func isEditableTextElement(_ element: AXUIElement) -> Bool {
@@ -460,6 +540,15 @@ final class FocusedTextInserter {
             return nil
         }
         return (object as? Bool) ?? ((object as? NSNumber)?.boolValue)
+    }
+
+    private static func integerAttribute(_ attribute: String, on element: AXUIElement) -> Int? {
+        var object: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &object) == .success,
+              let object else {
+            return nil
+        }
+        return (object as? Int) ?? (object as? NSNumber)?.intValue
     }
 
     private static func rangeAttribute(_ attribute: String, on element: AXUIElement) -> CFRange? {
@@ -529,6 +618,33 @@ final class FocusedTextInserter {
             return false
         }
         return settable.boolValue
+    }
+
+    private static func repairInsertionPointToEndOnce(of element: AXUIElement, text: String) {
+        setInsertionPointToEnd(of: element, text: text)
+
+        // Codex/Electron can accept AXValue and then move the caret to the
+        // start on the next UI tick. One short follow-up keeps the default
+        // post-insert caret at the end without continuing to fight the user.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
+            setInsertionPointToEnd(of: element, text: text)
+        }
+    }
+
+    @discardableResult
+    private static func setInsertionPointToEnd(of element: AXUIElement, text: String) -> Bool {
+        guard isAttributeSettable(kAXSelectedTextRangeAttribute as String, on: element) else {
+            return false
+        }
+        var range = CFRange(location: (text as NSString).length, length: 0)
+        guard let rangeValue = AXValueCreate(.cfRange, &range) else {
+            return false
+        }
+        return AXUIElementSetAttributeValue(
+            element,
+            kAXSelectedTextRangeAttribute as CFString,
+            rangeValue
+        ) == .success
     }
 
     private static func postCommandKey(_ keyCode: CGKeyCode) {

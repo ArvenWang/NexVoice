@@ -50,6 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var selectedTextContextForCurrentSession: SelectedTextContext?
     private var rewriteContextForCurrentSession: VoiceRewriteContext?
     private var focusedDraftForCurrentSession: String?
+    private var focusedDraftReadMethodForCurrentSession: FocusedTextAccessMethod?
     private var hasEditableSelectionForCurrentSession = false
     private var screenReplyCapturedContextForCurrentSession: ScreenReplyCapturedContext?
     private var pendingScreenReplyVoiceInstruction: String?
@@ -422,6 +423,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         selectedTextContextForCurrentSession = nil
         rewriteContextForCurrentSession = nil
         focusedDraftForCurrentSession = nil
+        focusedDraftReadMethodForCurrentSession = nil
         hasEditableSelectionForCurrentSession = false
         screenReplyCapturedContextForCurrentSession = nil
         pendingScreenReplyVoiceInstruction = nil
@@ -552,9 +554,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hasEditableSelectionForCurrentSession = textInserter.hasEditableSelection(
             in: targetApplicationForCurrentSession
         )
-        focusedDraftForCurrentSession = hasEditableSelectionForCurrentSession
-            ? nil
-            : await textInserter.focusedDraftSnapshot(in: targetApplicationForCurrentSession)
+        if hasEditableSelectionForCurrentSession {
+            focusedDraftForCurrentSession = nil
+            focusedDraftReadMethodForCurrentSession = nil
+        } else if let snapshot = await textInserter.focusedDraftSnapshotResult(
+            in: targetApplicationForCurrentSession
+        ) {
+            focusedDraftForCurrentSession = snapshot.text
+            focusedDraftReadMethodForCurrentSession = snapshot.method
+        }
         let personalDictionary = VoicePersonalDictionaryStore.load()
         rewriteContextForCurrentSession = textInserter.rewriteContext(
             in: targetApplicationForCurrentSession,
@@ -697,7 +705,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     hasEditableSelection: hasEditableSelectionForCurrentSession,
                     focusedDraft: focusedDraftForCurrentSession,
                     newTranscript: originalText,
-                    insertionMode: continuousRewriteDecision.insertionMode
+                    insertionMode: continuousRewriteDecision.insertionMode,
+                    draftReadMethod: focusedDraftReadMethodForCurrentSession
                 )
             )
         }
@@ -783,6 +792,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         selectedTextContextForCurrentSession = nil
         rewriteContextForCurrentSession = nil
         focusedDraftForCurrentSession = nil
+        focusedDraftReadMethodForCurrentSession = nil
         hasEditableSelectionForCurrentSession = false
         latestRecoverableASRText = nil
         pendingFailedTranscriptionRetry = nil
@@ -807,6 +817,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rewriteTask = nil
         rewriteContextForCurrentSession = nil
         focusedDraftForCurrentSession = nil
+        let draftReadMethod = focusedDraftReadMethodForCurrentSession
+        focusedDraftReadMethodForCurrentSession = nil
         hasEditableSelectionForCurrentSession = false
         latestRecoverableASRText = nil
         pendingFailedTranscriptionRetry = nil
@@ -818,6 +830,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .replaceFocusedDraft:
                 try textInserter.replaceFocusedDraft(text, into: targetApplication)
             }
+            Task {
+                await ContinuousRewriteDiagnosticsLogger.shared.log(
+                    ContinuousRewriteDiagnosticEvent(
+                        event: "inserted",
+                        appName: targetApplication?.localizedName,
+                        bundleIdentifier: targetApplication?.bundleIdentifier,
+                        hasEditableSelection: false,
+                        focusedDraft: nil,
+                        newTranscript: originalASRText,
+                        insertionMode: insertionMode,
+                        draftReadMethod: draftReadMethod,
+                        actualInsertionMethod: textInserter.latestInsertionMethod,
+                        insertedText: text
+                    )
+                )
+            }
+            schedulePostInsertionReadbackDiagnostic(
+                insertedText: text,
+                originalASRText: originalASRText,
+                targetApplication: targetApplication,
+                insertionMode: insertionMode,
+                draftReadMethod: draftReadMethod,
+                actualInsertionMethod: textInserter.latestInsertionMethod
+            )
             dictionaryLearningMonitor.observePossibleEdit(
                 insertedText: text,
                 originalASRText: originalASRText,
@@ -832,6 +868,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             captionPanel.showStatus("输入失败", isError: true, autoHideDelay: 1.4)
             statusItem?.button?.title = "NexVoice 出错"
             refreshMenuState()
+        }
+    }
+
+    private func schedulePostInsertionReadbackDiagnostic(
+        insertedText: String,
+        originalASRText: String,
+        targetApplication: NSRunningApplication?,
+        insertionMode: VoiceContinuousRewriteInsertionMode,
+        draftReadMethod: FocusedTextAccessMethod?,
+        actualInsertionMethod: FocusedTextAccessMethod?
+    ) {
+        // Temporary diagnostic for Codex/Electron newline handling. Remove once
+        // we know whether AX writeback preserves paragraph breaks in practice.
+        Task { @MainActor [weak self, targetApplication] in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard let self else { return }
+            let readbackSnapshot = await self.textInserter.focusedDraftSnapshotResult(in: targetApplication)
+            await ContinuousRewriteDiagnosticsLogger.shared.log(
+                ContinuousRewriteDiagnosticEvent(
+                    event: "post_insert_readback",
+                    appName: targetApplication?.localizedName,
+                    bundleIdentifier: targetApplication?.bundleIdentifier,
+                    hasEditableSelection: false,
+                    focusedDraft: nil,
+                    newTranscript: originalASRText,
+                    insertionMode: insertionMode,
+                    draftReadMethod: draftReadMethod,
+                    actualInsertionMethod: actualInsertionMethod,
+                    insertedText: insertedText,
+                    readbackText: readbackSnapshot?.text,
+                    readbackMethod: readbackSnapshot?.method,
+                    expectedReadbackText: insertedText,
+                    includeTextPreviews: false
+                )
+            )
         }
     }
 

@@ -113,21 +113,21 @@ import Testing
         selectedTextCharacters: nil,
         sourceTextCharacters: 120,
         sourceText: "这个事情啊。我觉得。就是。我们可能。还是要看一下。因为它现在。感觉没有完全被润色掉。"
-    ) == 12)
+    ) == 16)
 
     #expect(VoiceRewriteTimeoutPolicy.timeoutSeconds(
         operation: "final_rewrite",
         promptCharacters: 900,
         selectedTextCharacters: nil,
         sourceTextCharacters: 177
-    ) == 12)
+    ) == 14)
 
     #expect(VoiceRewriteTimeoutPolicy.timeoutSeconds(
         operation: "final_rewrite",
         promptCharacters: 1_800,
         selectedTextCharacters: nil,
         sourceTextCharacters: 320
-    ) == 12)
+    ) == 16)
 
     #expect(VoiceRewriteTimeoutPolicy.timeoutSeconds(
         operation: "selected_text_command",

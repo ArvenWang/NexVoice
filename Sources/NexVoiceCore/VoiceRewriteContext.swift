@@ -306,13 +306,13 @@ public enum VoiceRewriteTimeoutPolicy {
 
         if let sourceTextCharacters {
             if sourceLooksFragmented(sourceText) {
-                return 12
+                return 16
             }
             if sourceTextCharacters > 260 {
-                return 12
+                return 16
             }
             if sourceTextCharacters > 160 {
-                return 12
+                return 14
             }
             if sourceTextCharacters > 90 {
                 return 10
