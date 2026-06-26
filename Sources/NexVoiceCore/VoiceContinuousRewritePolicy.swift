@@ -26,12 +26,20 @@ public enum VoiceContinuousRewritePolicy {
 
     public static func decision(
         focusedDraft: String?,
+        focusedDraftIsTrusted: Bool = true,
         newTranscript: String,
         hasEditableSelection: Bool,
         maximumFocusedDraftCharacters: Int = defaultMaximumFocusedDraftCharacters
     ) -> VoiceContinuousRewriteDecision {
         let transcript = newTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
         let draft = focusedDraft?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard focusedDraftIsTrusted else {
+            return VoiceContinuousRewriteDecision(
+                rewriteSource: transcript,
+                insertionMode: .insertAtCursor
+            )
+        }
 
         guard let draft, !draft.isEmpty else {
             return VoiceContinuousRewriteDecision(

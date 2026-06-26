@@ -193,6 +193,8 @@ import Testing
     #expect(prompt.contains("do not force slang"))
     #expect(prompt.contains("Preserve meaning, tone, certainty, frequency"))
     #expect(prompt.contains("once in a while"))
+    #expect(prompt.contains("Return only the final English text"))
+    #expect(prompt.contains("Here's the cleaned-up version of your input"))
     #expect(prompt.contains("社交达人"))
     #expect(prompt.contains("X、Reddit"))
     #expect(prompt.contains("常见缩写"))
@@ -346,6 +348,22 @@ import Testing
     """)
 
     #expect(output == "This feels a lot more natural.")
+}
+
+@Test func rewriteOutputSanitizerRemovesEnglishAssistantWrappersSeenInLogs() {
+    let polished = VoiceRewriteOutputSanitizer.sanitize("""
+    Here's the polished version of your input:
+
+    互动百科工作流
+    """)
+    let cleaned = VoiceRewriteOutputSanitizer.sanitize("""
+    Here’s the cleaned-up version of your input:
+
+    **互动百科工作流**
+    """)
+
+    #expect(polished == "互动百科工作流")
+    #expect(cleaned == "互动百科工作流")
 }
 
 @Test func rewriteOutputSanitizerPreservesUserLiteralInstructions() {

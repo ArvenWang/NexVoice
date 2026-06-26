@@ -21,6 +21,30 @@ import Testing
     #expect(context.diagnosticsSummary.contains("agent-collaboration"))
 }
 
+@Test func rewriteContextCanRemoveUntrustedFocusedTextPreview() {
+    let context = VoiceRewriteContext(
+        sourceApplicationName: "Google Chrome",
+        sourceApplicationBundleIdentifier: "com.google.Chrome",
+        focusedElementRole: "AXTextArea",
+        focusedElementDescription: "与 ChatGPT 聊天",
+        focusedTextPreview: "有问题，尽管问",
+        personalDictionary: VoicePersonalDictionary(terms: [
+            VoicePersonalDictionaryTerm(phrase: "NexVoice", weight: 11)
+        ])
+    )
+
+    let sanitized = context.removingFocusedTextPreview()
+
+    #expect(sanitized.sourceApplicationName == "Google Chrome")
+    #expect(sanitized.sourceApplicationBundleIdentifier == "com.google.Chrome")
+    #expect(sanitized.focusedElementRole == "AXTextArea")
+    #expect(sanitized.focusedElementDescription == "与 ChatGPT 聊天")
+    #expect(sanitized.focusedTextPreview == nil)
+    #expect(sanitized.personalDictionary.terms.map(\.phrase) == ["NexVoice"])
+    #expect(!sanitized.promptBlock.contains("有问题，尽管问"))
+    #expect(!sanitized.promptBlock.contains("输入框片段"))
+}
+
 @Test func rewriteContextDetectsEmailProfile() {
     let context = VoiceRewriteContext(
         sourceApplicationName: "Mail",

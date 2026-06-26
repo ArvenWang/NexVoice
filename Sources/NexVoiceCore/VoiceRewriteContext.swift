@@ -161,6 +161,18 @@ public struct VoiceRewriteContext: Equatable, Sendable {
         applicationWorkflow.profile
     }
 
+    public func removingFocusedTextPreview() -> VoiceRewriteContext {
+        VoiceRewriteContext(
+            sourceApplicationName: sourceApplicationName,
+            sourceApplicationBundleIdentifier: sourceApplicationBundleIdentifier,
+            focusedElementRole: focusedElementRole,
+            focusedElementDescription: focusedElementDescription,
+            focusedTextPreview: nil,
+            selectedTextMode: selectedTextMode,
+            personalDictionary: personalDictionary
+        )
+    }
+
     public var applicationWorkflow: VoiceAppWorkflow {
         VoiceAppWorkflowPolicy.workflow(
             appName: sourceApplicationName,

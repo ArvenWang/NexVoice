@@ -18,6 +18,7 @@ enum FocusedTextAccessMethod: String {
 struct FocusedDraftSnapshot {
     let text: String
     let method: FocusedTextAccessMethod
+    let requiresTrustValidation: Bool
 }
 
 enum FocusedTextInsertionError: LocalizedError {
@@ -506,18 +507,73 @@ final class FocusedTextInserter {
         for element in elements where isDraftReadableElement(element) {
             if let selectedText = stringAttribute(kAXSelectedTextAttribute as String, on: element),
                isRealFocusedDraft(selectedText, on: element, targetApplication: targetApplication) {
-                return FocusedDraftSnapshot(text: selectedText, method: .axValue)
+                return FocusedDraftSnapshot(
+                    text: selectedText,
+                    method: .axValue,
+                    requiresTrustValidation: requiresTrustValidation(
+                        for: element,
+                        in: elements,
+                        targetApplication: targetApplication
+                    )
+                )
             }
             if let value = stringAttribute(kAXValueAttribute as String, on: element),
                isRealFocusedDraft(value, on: element, targetApplication: targetApplication) {
-                return FocusedDraftSnapshot(text: value, method: .axValue)
+                return FocusedDraftSnapshot(
+                    text: value,
+                    method: .axValue,
+                    requiresTrustValidation: requiresTrustValidation(
+                        for: element,
+                        in: elements,
+                        targetApplication: targetApplication
+                    )
+                )
             }
             if let text = stringForFullRange(on: element),
                isRealFocusedDraft(text, on: element, targetApplication: targetApplication) {
-                return FocusedDraftSnapshot(text: text, method: .axStringForRange)
+                return FocusedDraftSnapshot(
+                    text: text,
+                    method: .axStringForRange,
+                    requiresTrustValidation: requiresTrustValidation(
+                        for: element,
+                        in: elements,
+                        targetApplication: targetApplication
+                    )
+                )
             }
         }
         return nil
+    }
+
+    private static func requiresTrustValidation(
+        for element: AXUIElement,
+        in candidateElements: [AXUIElement],
+        targetApplication: NSRunningApplication?
+    ) -> Bool {
+        if isKnownWeakDraftApplication(targetApplication?.bundleIdentifier) {
+            return true
+        }
+
+        let contextElements = candidateElements + elementAndParents(from: element, maxDepth: 8)
+        return contextElements.contains { element in
+            stringAttribute(kAXRoleAttribute as String, on: element) == "AXWebArea"
+        }
+    }
+
+    private static func isKnownWeakDraftApplication(_ bundleIdentifier: String?) -> Bool {
+        guard let bundleIdentifier else { return false }
+        let weakDraftBundleIdentifiers: Set<String> = [
+            "com.openai.codex",
+            "com.google.Chrome",
+            "com.google.Chrome.canary",
+            "com.apple.Safari",
+            "com.apple.SafariTechnologyPreview",
+            "com.microsoft.edgemac",
+            "company.thebrowser.Browser",
+            "com.brave.Browser",
+            "org.mozilla.firefox"
+        ]
+        return weakDraftBundleIdentifiers.contains(bundleIdentifier)
     }
 
     private static func isRealFocusedDraft(

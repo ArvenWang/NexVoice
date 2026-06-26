@@ -51,6 +51,7 @@ struct ContinuousRewriteDiagnosticEvent: Encodable {
     let bundleIdentifier: String?
     let hasEditableSelection: Bool
     let focusedDraftCharacters: Int
+    let focusedDraftTrusted: Bool?
     let newTranscriptCharacters: Int
     let insertionMode: String
     let draftReadMethod: String?
@@ -76,6 +77,7 @@ struct ContinuousRewriteDiagnosticEvent: Encodable {
         bundleIdentifier: String?,
         hasEditableSelection: Bool,
         focusedDraft: String?,
+        focusedDraftTrusted: Bool? = nil,
         newTranscript: String,
         insertionMode: VoiceContinuousRewriteInsertionMode,
         draftReadMethod: FocusedTextAccessMethod? = nil,
@@ -93,6 +95,7 @@ struct ContinuousRewriteDiagnosticEvent: Encodable {
         self.bundleIdentifier = bundleIdentifier
         self.hasEditableSelection = hasEditableSelection
         self.focusedDraftCharacters = focusedDraft?.count ?? 0
+        self.focusedDraftTrusted = focusedDraftTrusted
         self.newTranscriptCharacters = newTranscript.count
         self.insertionMode = String(describing: insertionMode)
         self.draftReadMethod = draftReadMethod?.rawValue

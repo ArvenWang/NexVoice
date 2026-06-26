@@ -10,6 +10,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let targetApplication: NSRunningApplication?
     }
 
+    private struct TrustedFocusedDraftRecord {
+        let bundleIdentifier: String?
+        let processIdentifier: pid_t?
+        let text: String
+        let recordedAt: Date
+    }
+
     private var statusItem: NSStatusItem?
     private var shortcutMenuItem: NSMenuItem?
     private var shortcutSettingsMenuItem: NSMenuItem?
@@ -51,6 +58,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var rewriteContextForCurrentSession: VoiceRewriteContext?
     private var focusedDraftForCurrentSession: String?
     private var focusedDraftReadMethodForCurrentSession: FocusedTextAccessMethod?
+    private var focusedDraftIsTrustedForCurrentSession = false
+    private var latestTrustedFocusedDraftRecord: TrustedFocusedDraftRecord?
     private var hasEditableSelectionForCurrentSession = false
     private var screenReplyCapturedContextForCurrentSession: ScreenReplyCapturedContext?
     private var pendingScreenReplyVoiceInstruction: String?
@@ -424,6 +433,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rewriteContextForCurrentSession = nil
         focusedDraftForCurrentSession = nil
         focusedDraftReadMethodForCurrentSession = nil
+        focusedDraftIsTrustedForCurrentSession = false
         hasEditableSelectionForCurrentSession = false
         screenReplyCapturedContextForCurrentSession = nil
         pendingScreenReplyVoiceInstruction = nil
@@ -525,6 +535,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rewriteContextForCurrentSession = nil
         focusedDraftForCurrentSession = nil
         hasEditableSelectionForCurrentSession = false
+        focusedDraftIsTrustedForCurrentSession = false
         screenReplyCapturedContextForCurrentSession = nil
         pendingScreenReplyVoiceInstruction = nil
         didInsertCurrentSession = false
@@ -557,11 +568,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if hasEditableSelectionForCurrentSession {
             focusedDraftForCurrentSession = nil
             focusedDraftReadMethodForCurrentSession = nil
+            focusedDraftIsTrustedForCurrentSession = false
         } else if let snapshot = await textInserter.focusedDraftSnapshotResult(
             in: targetApplicationForCurrentSession
         ) {
             focusedDraftForCurrentSession = snapshot.text
             focusedDraftReadMethodForCurrentSession = snapshot.method
+            focusedDraftIsTrustedForCurrentSession = isFocusedDraftTrusted(
+                snapshot,
+                in: targetApplicationForCurrentSession
+            )
         }
         let personalDictionary = VoicePersonalDictionaryStore.load()
         rewriteContextForCurrentSession = textInserter.rewriteContext(
@@ -569,6 +585,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             selectedTextMode: selectedTextContextForCurrentSession?.text.isEmpty == false,
             personalDictionary: personalDictionary
         )
+        if focusedDraftForCurrentSession?.isEmpty == false,
+           !focusedDraftIsTrustedForCurrentSession {
+            rewriteContextForCurrentSession = rewriteContextForCurrentSession?.removingFocusedTextPreview()
+        }
         guard !isCurrentSessionCancelled, !Task.isCancelled else {
             beginSessionTask = nil
             return
@@ -693,6 +713,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let originalText = text
         let continuousRewriteDecision = VoiceContinuousRewritePolicy.decision(
             focusedDraft: focusedDraftForCurrentSession,
+            focusedDraftIsTrusted: focusedDraftIsTrustedForCurrentSession,
             newTranscript: originalText,
             hasEditableSelection: hasEditableSelectionForCurrentSession
         )
@@ -704,6 +725,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     bundleIdentifier: targetApplicationForCurrentSession?.bundleIdentifier,
                     hasEditableSelection: hasEditableSelectionForCurrentSession,
                     focusedDraft: focusedDraftForCurrentSession,
+                    focusedDraftTrusted: focusedDraftIsTrustedForCurrentSession,
                     newTranscript: originalText,
                     insertionMode: continuousRewriteDecision.insertionMode,
                     draftReadMethod: focusedDraftReadMethodForCurrentSession
@@ -788,11 +810,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func isFocusedDraftTrusted(
+        _ snapshot: FocusedDraftSnapshot,
+        in targetApplication: NSRunningApplication?
+    ) -> Bool {
+        guard snapshot.requiresTrustValidation else { return true }
+        guard let record = latestTrustedFocusedDraftRecord,
+              record.bundleIdentifier == targetApplication?.bundleIdentifier,
+              record.processIdentifier == targetApplication?.processIdentifier,
+              Date().timeIntervalSince(record.recordedAt) <= 10 * 60 else {
+            return false
+        }
+
+        let currentDraft = Self.normalizedDraftForTrust(snapshot.text)
+        let trustedDraft = Self.normalizedDraftForTrust(record.text)
+        guard !currentDraft.isEmpty, !trustedDraft.isEmpty else { return false }
+
+        return currentDraft == trustedDraft
+            || currentDraft.contains(trustedDraft)
+            || trustedDraft.contains(currentDraft)
+    }
+
+    private func rememberTrustedFocusedDraft(
+        _ text: String,
+        in targetApplication: NSRunningApplication?
+    ) {
+        let normalizedText = Self.normalizedDraftForTrust(text)
+        guard !normalizedText.isEmpty else { return }
+        latestTrustedFocusedDraftRecord = TrustedFocusedDraftRecord(
+            bundleIdentifier: targetApplication?.bundleIdentifier,
+            processIdentifier: targetApplication?.processIdentifier,
+            text: normalizedText,
+            recordedAt: Date()
+        )
+    }
+
+    private static func normalizedDraftForTrust(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private func showContextualResult(_ text: String, anchorRect: CGRect?) {
         selectedTextContextForCurrentSession = nil
         rewriteContextForCurrentSession = nil
         focusedDraftForCurrentSession = nil
         focusedDraftReadMethodForCurrentSession = nil
+        focusedDraftIsTrustedForCurrentSession = false
         hasEditableSelectionForCurrentSession = false
         latestRecoverableASRText = nil
         pendingFailedTranscriptionRetry = nil
@@ -819,6 +884,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         focusedDraftForCurrentSession = nil
         let draftReadMethod = focusedDraftReadMethodForCurrentSession
         focusedDraftReadMethodForCurrentSession = nil
+        focusedDraftIsTrustedForCurrentSession = false
         let hadEditableSelection = hasEditableSelectionForCurrentSession
         hasEditableSelectionForCurrentSession = false
         latestRecoverableASRText = nil
@@ -831,6 +897,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .replaceFocusedDraft:
                 try textInserter.replaceFocusedDraft(text, into: targetApplication)
             }
+            rememberTrustedFocusedDraft(text, in: targetApplication)
             Task {
                 await ContinuousRewriteDiagnosticsLogger.shared.log(
                     ContinuousRewriteDiagnosticEvent(
@@ -1043,6 +1110,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rewriteTask = nil
         rewriteContextForCurrentSession = nil
         focusedDraftForCurrentSession = nil
+        focusedDraftReadMethodForCurrentSession = nil
+        focusedDraftIsTrustedForCurrentSession = false
         hasEditableSelectionForCurrentSession = false
         do {
             try textInserter.insert(reply, into: targetApplication)
@@ -1060,6 +1129,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rewriteTask = nil
         rewriteContextForCurrentSession = nil
         focusedDraftForCurrentSession = nil
+        focusedDraftReadMethodForCurrentSession = nil
+        focusedDraftIsTrustedForCurrentSession = false
         hasEditableSelectionForCurrentSession = false
         let message: String
         if case ScreenReplyCaptureError.screenRecordingPermissionRequired = error {
@@ -1111,6 +1182,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         selectedTextContextForCurrentSession = nil
         rewriteContextForCurrentSession = nil
         focusedDraftForCurrentSession = nil
+        focusedDraftReadMethodForCurrentSession = nil
+        focusedDraftIsTrustedForCurrentSession = false
         hasEditableSelectionForCurrentSession = false
         screenReplyCapturedContextForCurrentSession = nil
         pendingScreenReplyVoiceInstruction = nil
@@ -1144,6 +1217,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             rewriteTask?.cancel()
             rewriteTask = nil
             focusedDraftForCurrentSession = nil
+            focusedDraftReadMethodForCurrentSession = nil
+            focusedDraftIsTrustedForCurrentSession = false
             hasEditableSelectionForCurrentSession = false
             captionPanel.showStatus("未识别到语音", isError: false, autoHideDelay: 0.9)
             statusItem?.button?.title = "NexVoice"

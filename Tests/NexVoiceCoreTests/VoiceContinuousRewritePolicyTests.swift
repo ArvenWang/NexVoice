@@ -15,6 +15,19 @@ import Testing
     #expect(decision.rewriteSource.contains("然后我不一定一次说完，可能会分三次补充。"))
 }
 
+@Test func continuousRewriteIgnoresUntrustedFocusedDraft() {
+    let decision = VoiceContinuousRewritePolicy.decision(
+        focusedDraft: "继续追问",
+        focusedDraftIsTrusted: false,
+        newTranscript: "现在每次说话都会带引导语，会把引导语带出来。",
+        hasEditableSelection: false
+    )
+
+    #expect(decision.insertionMode == .insertAtCursor)
+    #expect(decision.rewriteSource == "现在每次说话都会带引导语，会把引导语带出来。")
+    #expect(decision.focusedDraft == nil)
+}
+
 @Test func continuousRewriteFallsBackToCurrentTranscriptWhenInputIsEmpty() {
     let decision = VoiceContinuousRewritePolicy.decision(
         focusedDraft: "   \n",

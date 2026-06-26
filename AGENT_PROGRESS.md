@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-- 当前工作目录：`/Users/nefish/Desktop/Coding/NexVoice`。
+- 当前工作目录：`/Users/nefish/Desktop/WorkSpace/Coding/NexVoice`。
 - 项目形态：SwiftPM macOS 菜单栏 App，核心模块为 `NexVoiceCore`，宿主为 `NexVoiceHost`。
 - 默认入口：短按右 Alt 开始语音输入，再按一次结束；长按右 Alt 约 0.55 秒进入看屏自动回复；ESC 可取消录音、等待 final、AI 改写或看屏回复中的会话。
 - 当前主链路：腾讯云实时 ASR `16k_zh_en` -> DeepSeek `deepseek-v4-flash` 最终整理 -> 写入当前聚焦输入框。
@@ -12,6 +12,145 @@
 - 本地 SenseVoice Small 和 WhisperKit large-v3 保留为兜底和质量对照，不是当前默认主链路。
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
+
+## 本轮追加（2026-06-26：修复英文输出时模型说明外壳泄漏）
+
+- 用户切到英文输出后复测发现：
+  - 说“互动百科工作流”时，DeepSeek 偶发返回 `Here's the polished version of your input:` / `Here’s the cleaned-up version of your input:` 这类说明性外壳。
+  - 本地插入阶段会把清洗后的结果直接写入，因此外壳残留会进入真实输入框。
+- 日志定位：
+  - `ContinuousRewrite.jsonl` 显示这些轮次都是 `insertAtCursor`，不是连续改写或可信草稿机制导致。
+  - `DeepSeekRewrite.jsonl` 显示 ASR 原文是 `互动百科工作流。`，异常出现在 DeepSeek 英文改写返回阶段。
+  - 个人词库只有 `web端的GPT`，没有 `互动百科工作流`，所以不是词库把英文译文强制保护回中文。
+- 本轮修复：
+  - `VoiceRewritePromptPolicy.systemPrompt` 增加明确输出契约：不要输出“以下是 / Here is / Here's the rewritten text”等说明性前缀。
+  - 英文输出指令增加硬约束：只返回最终英文正文，不加 label、解释、Markdown、引号或 `Here's the cleaned-up version...` 这类前缀。
+  - `VoiceRewriteOutputSanitizer` 扩展英文 meta 前缀清洗，覆盖日志中真实出现的 `polished version of your input`、`cleaned-up version of your input`、弯引号 `Here’s` 和 Markdown 加粗包装。
+- 当前取舍：
+  - 这不是按用户内容做硬编码删除，不会识别并抹掉某个用户说过的词；只清理模型自己添加的说明性外壳。
+  - 如果模型把中文短语保留为专名而不是翻译，当前修复不会强行二次翻译；但 prompt 已更明确要求英文模式只返回最终英文正文。
+- 已构建并安装新版：
+  - 安装路径：`/Applications/NexVoice.app`
+  - 旧版备份：`dist/install-backups/NexVoice-20260626-153829.app`
+  - 当前运行 PID：`20472`
+  - 包内版本仍为 `0.1.43 (44)`；本轮未提交，未触发版本 hook，属于同版本号下的本地修正版。
+  - 新 DMG：`dist/NexVoice-0.1.43-build44-english-output-guard-embedded-keys-20260626.dmg`
+- 验证：
+  - 先写失败测试：覆盖日志里的 `Here's the polished version of your input:` 与 `Here’s the cleaned-up version of your input:`；初次运行失败并复现残留。
+  - `swift test --disable-sandbox --filter DeepSeekFinalRewriteConfiguration --quiet` 通过，25 个测试。
+  - `swift test --disable-sandbox --quiet` 通过，148 个测试。
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 通过。
+  - `git diff --check` 通过。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过。
+  - `plutil -lint dist/NexVoice.app/Contents/Info.plist` 通过。
+  - `hdiutil verify dist/NexVoice-0.1.43-build44-english-output-guard-embedded-keys-20260626.dmg` 通过。
+  - `/Applications/NexVoice.app` 签名、版本号和嵌入配置检查通过。
+- 需要用户复测：
+  - 英文输出模式下再说短中文词组，例如“互动百科工作流”，不应再出现 `Here's...` 说明性前缀或 Markdown 加粗。
+  - 如果模型仍把短中文专名原样保留，需要再单独判断“哪些中文短语应该翻译，哪些应该作为专名保留”的策略。
+
+## 本轮追加（2026-06-26：阻止 Web/Electron 输入框提示文案污染连续改写）
+
+- 用户复测发现更严重问题：
+  - Codex 空输入框中的灰色示例文案 `要求后续变更` 会被 AXValue 读成真实草稿。
+  - Chrome / ChatGPT Web 也会把提示性文案（如 `继续追问`、`有问题，尽管问`）作为输入框 Value 暴露，导致 NexVoice 把提示文案合并进最终文本。
+  - 用户明确不要靠硬编码某几个提示字来抹除，需要更通用的机制。
+- 根因：
+  - 当前逻辑把“AXValue 非空”直接等同于“用户已有草稿”，这个假设在 Web / Electron / WebView 输入框里不成立。
+  - 现有 placeholder 过滤只检查同一个 AX 元素的 `AXPlaceholderValue / AXDescription / AXTitle / AXHelp`；当 Web 把提示文案直接暴露成 `AXValue` 时无法识别。
+- 本轮修复：
+  - `VoiceContinuousRewritePolicy.decision(...)` 新增 `focusedDraftIsTrusted` 参数；非可信草稿一律不触发连续改写，按空输入框处理。
+  - `FocusedDraftSnapshot` 新增 `requiresTrustValidation`；Chrome/Safari/Edge/Brave/Firefox/Arc/Codex 或 AX 树中包含 `AXWebArea` 的输入框草稿会被视为弱草稿，需要额外可信证据。
+  - App 记录 NexVoice 上一轮成功写入的文本、目标 App bundle 和进程；弱草稿只有与这条可信写入记录一致或包含关系明确时，才允许进入连续改写。
+  - `ContinuousRewrite.jsonl` 新增 `focusedDraftTrusted` 字段，后续复测可以直接看到是否因弱草稿被拦截。
+  - 没有恢复固定文案兜底，也没有新增针对 `要求后续变更` / `继续追问` 的硬编码过滤。
+- 当前取舍：
+  - Web/Electron 场景首次语音会更保守：即使 AXValue 非空，只要不能证明是真草稿，就不会触发连续改写。
+  - NexVoice 成功写入后，下一轮同 App / 同进程读到相同或延续内容，会恢复连续改写。
+  - 如果用户手动在 Web 输入框里先输入一段草稿，再第一次用 NexVoice 接着说，本轮可能不会做整体改写；这是为了优先避免提示文案污染。
+- 已构建并安装新版：
+  - 安装路径：`/Applications/NexVoice.app`
+  - 旧版备份：`dist/install-backups/NexVoice-20260626-130750.app`
+  - 当前运行 PID：`35622`
+  - 包内版本仍为 `0.1.43 (44)`；本轮未提交，未触发版本 hook，属于同版本号下的本地修正版。
+  - 新 DMG：`dist/NexVoice-0.1.43-build44-trusted-draft-embedded-keys-20260626.dmg`
+- 验证：
+  - 先写失败测试：非可信草稿不应触发连续改写；初次运行因 API 缺失失败。
+  - `swift test --disable-sandbox --filter VoiceContinuousRewrite --quiet` 通过，6 个测试。
+  - `swift test --disable-sandbox --quiet` 通过，146 个测试。
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 通过。
+  - `git diff --check` 通过。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过。
+  - `plutil -lint dist/NexVoice.app/Contents/Info.plist` 通过。
+  - `hdiutil verify dist/NexVoice-0.1.43-build44-trusted-draft-embedded-keys-20260626.dmg` 通过。
+- 需要用户复测：
+  - 在 Codex 空输入框直接语音，`ContinuousRewrite.jsonl` 应显示 `focusedDraftCharacters=7` 但 `focusedDraftTrusted=false`，`insertionMode=insertAtCursor`。
+  - 在 Chrome / ChatGPT Web 空输入框直接语音，提示文案不应被带入最终文本。
+  - NexVoice 写入第一句后，第二句继续说同一段内容，应重新出现可信连续改写。
+
+## 本轮追加（2026-06-26：非可信输入框片段不再进入 DeepSeek 上下文）
+
+- 用户复测后日志确认：
+  - Codex 最新语音读到 `要求后续变更`，但 `focusedDraftTrusted=false`，`insertionMode=insertAtCursor`，最终写入未带入该提示文案。
+  - Chrome / ChatGPT Web 最新语音读到 `有问题，尽管问`，但 `focusedDraftTrusted=false`，`insertionMode=insertAtCursor`，最终写入未带入该提示文案。
+- 发现剩余风险：
+  - 虽然非可信草稿不再参与连续改写，但 DeepSeek prompt 的 `当前上下文` 里仍会包含 `输入框片段`，例如 `要求后续变更` / `有问题，尽管问`。
+  - 当前模型没有把它写进输出，但更彻底的方案是：非可信草稿也不作为上下文片段传给模型。
+- 本轮修复：
+  - `VoiceRewriteContext` 新增 `removingFocusedTextPreview()`，可保留 App、bundle、焦点角色、说明、词库等上下文，但移除输入框片段。
+  - 录音开始时，如果读到的草稿不可信，会在构造 `rewriteContextForCurrentSession` 后移除 `focusedTextPreview`，避免提示文案进入 DeepSeek prompt。
+  - 不影响可信草稿：NexVoice 上一轮成功写入后，下一轮同 App / 同进程读到匹配草稿，仍允许作为上下文和连续改写来源。
+- 当前取舍：
+  - Web/Electron 中用户手动先写的真实草稿，如果无法被证明可信，首次语音不会把它交给 DeepSeek 作上下文；这是为了彻底避免提示文案污染。
+  - 这个取舍比把提示文案给模型再要求“不要写入结果”更稳。
+- 已构建并安装新版：
+  - 安装路径：`/Applications/NexVoice.app`
+  - 旧版备份：`dist/install-backups/NexVoice-20260626-132217.app`
+  - 当前运行 PID：`62688`
+  - 包内版本仍为 `0.1.43 (44)`；本轮未提交，未触发版本 hook，属于同版本号下的本地修正版。
+  - 新 DMG：`dist/NexVoice-0.1.43-build44-trusted-draft-context-sanitized-embedded-keys-20260626.dmg`
+- 验证：
+  - 先写失败测试：`VoiceRewriteContext.removingFocusedTextPreview()` 应移除 prompt 中的输入框片段；初次运行因方法缺失失败。
+  - `swift test --disable-sandbox --filter VoiceRewriteContext --quiet` 通过，8 个测试。
+  - `swift test --disable-sandbox --quiet` 通过，147 个测试。
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 通过。
+  - `git diff --check` 通过。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过。
+  - `plutil -lint dist/NexVoice.app/Contents/Info.plist` 通过。
+  - `hdiutil verify dist/NexVoice-0.1.43-build44-trusted-draft-context-sanitized-embedded-keys-20260626.dmg` 通过。
+- 需要用户复测：
+  - Codex / Chrome 空输入框直接语音时，DeepSeek prompt 里不应再出现 `输入框片段` 下的提示文案。
+  - 如果用户手动输入真实草稿后第一次用语音续写，Web/Electron 场景可能仍按空输入框处理；后续需要考虑 DOM 级读取来区分真实手写内容和 placeholder。
+
+## 本轮追加（2026-06-26：接力最新 main 并构建安装 0.1.43）
+
+- 已按用户要求拉取远端最新代码：本地 `main` 从 `9b0cf7c` 快进到 `b7b19f9`。
+- 接力判断：
+  - 最新目标是保留安全的 AXValue 直接替换路径，优先恢复 Codex 连续输入的“整篇改写/结构化”。
+  - Codex 换行暂不作为当前目标；如果 Codex 仍读不到草稿，下一步应重新评估安全读写方案，不再恢复缓存、全选粘贴或键盘范围替换。
+- 已构建私用 release 包：
+  - App：`dist/NexVoice.app`
+  - DMG：`dist/NexVoice-0.1.43-build44-embedded-keys-20260626.dmg`
+  - 包内版本：`0.1.43 (44)`
+  - 已确认包内包含本机 `DeepSeek.json` 与 `TencentCloudASR.json` 嵌入配置，未在文档或日志中暴露密钥内容。
+- 已安装并启动新版：
+  - 安装路径：`/Applications/NexVoice.app`
+  - 旧版备份：`dist/install-backups/NexVoice-20260626-102523.app`
+  - 当前运行 PID：`42283`
+- 验证：
+  - `swift test --disable-sandbox --quiet` 通过，145 个测试。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过。
+  - `plutil -lint dist/NexVoice.app/Contents/Info.plist` 通过。
+  - `hdiutil verify dist/NexVoice-0.1.43-build44-embedded-keys-20260626.dmg` 通过。
+  - 已挂载 DMG 验证根目录包含 `NexVoice.app` 和 `Applications` 快捷入口，且嵌入配置文件非空。
+  - `/Applications/NexVoice.app` 签名、Info.plist、版本号和嵌入配置检查通过。
+- 未完成 / 需要用户复测：
+  - 尚未做真实右 Alt 语音验收。
+  - 重点看连续第二句是否出现 `focusedDraftCharacters>0` 和 `insertionMode=replaceFocusedDraft`；如果仍没有，说明 Codex 当前仍未暴露可安全读取的草稿。
 
 ## 本轮追加（2026-06-26：回退到早期整篇改写策略，放弃 Codex 换行专项）
 
