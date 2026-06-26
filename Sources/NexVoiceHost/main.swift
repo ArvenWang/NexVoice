@@ -94,6 +94,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         selectedOutputLanguage = Self.loadOutputLanguage()
         selectedRewriteStyle = Self.loadRewriteStyle()
         configureStatusItem()
+        captionPanel.onContextualResultHidden = { [weak self] in
+            self?.ocrRegionOverlay.hide()
+        }
         captionPanel.reset()
         startShortcutMonitor()
         prewarmSettingsWindow()
@@ -452,6 +455,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func beginContextQuestionAfterSelectionCapture() async {
         targetApplicationForCurrentSession = NSWorkspace.shared.frontmostApplication
         let targetApplication = targetApplicationForCurrentSession
+        let shortcutAnchorRect = CGRect(origin: NSEvent.mouseLocation, size: .zero)
 
         guard permissionService.authorizationStatus() == .authorized else {
             captionPanel.showPreparing()
@@ -463,6 +467,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let selectedTextContext = await textInserter.selectedTextQuestionContext(in: targetApplication) {
             beginSelectedTextQuestion(
                 selectedTextContext: selectedTextContext,
+                anchorRect: shortcutAnchorRect,
                 targetApplication: targetApplication
             )
             beginSessionTask = nil
@@ -470,11 +475,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         beginSessionTask = nil
-        beginMouseContextQuestion()
+        beginMouseContextQuestion(anchorRect: shortcutAnchorRect)
     }
 
     private func beginSelectedTextQuestion(
         selectedTextContext: SelectedTextContext,
+        anchorRect: CGRect,
         targetApplication: NSRunningApplication?
     ) {
         targetApplicationForCurrentSession = targetApplication
@@ -496,7 +502,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         contextCaptureInteractionModeForCurrentSession = .selectedTextQuestion
         let captureID = UUID().uuidString
         contextQuestionCaptureIDForCurrentSession = captureID
-        contextQuestionAnchorRectForCurrentSession = selectedTextContext.anchorRect
+        contextQuestionAnchorRectForCurrentSession = anchorRect
         didDetectScreenReplyVoiceInstruction = false
         dictionaryLearningMonitor.cancel()
         activeDictionaryLearningTasks = 0
@@ -529,7 +535,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
         }
 
-        captionPanel.showOverlay(anchorRect: selectedTextContext.anchorRect)
+        captionPanel.showOverlay(anchorRect: anchorRect)
         do {
             try transcriptionService.start(
                 personalDictionary: personalDictionary,
@@ -680,11 +686,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func beginMouseContextQuestion() {
+    private func beginMouseContextQuestion(anchorRect: CGRect? = nil) {
         targetApplicationForCurrentSession = NSWorkspace.shared.frontmostApplication
         let targetApplication = targetApplicationForCurrentSession
-        let mouseLocation = NSEvent.mouseLocation
-        let anchorRect = CGRect(origin: mouseLocation, size: .zero)
+        let anchorRect = anchorRect ?? CGRect(origin: NSEvent.mouseLocation, size: .zero)
+        let mouseLocation = anchorRect.origin
         let captureID = UUID().uuidString
 
         guard SystemPermissionRequester.hasScreenRecordingPermission else {
@@ -783,7 +789,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.screenReplyCapturedContextForCurrentSession = capturedContext
                 self.contextCaptureTask = nil
                 if let region = capturedContext.mouseRegionInScreen {
-                    self.ocrRegionOverlay.show(region: region, autoHideAfter: 8)
+                    self.ocrRegionOverlay.show(region: region)
                 }
                 if let instruction = self.pendingScreenReplyVoiceInstruction {
                     self.pendingScreenReplyVoiceInstruction = nil
@@ -1117,7 +1123,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
                 await MainActor.run {
                     guard !self.isCurrentSessionCancelled else { return }
-                    self.showContextualResult(result, anchorRect: selectedTextContext.anchorRect)
+                    self.showContextualResult(
+                        result,
+                        anchorRect: self.contextQuestionAnchorRectForCurrentSession
+                    )
                 }
             } else {
                 let textForInsertion: String
@@ -1702,7 +1711,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else if contextCaptureInteractionModeForCurrentSession == .mouseContextQuestion {
             captionPanel.showLoading("AI 回答中", anchorRect: contextQuestionAnchorRectForCurrentSession)
         } else if selectedTextContextForCurrentSession?.text.isEmpty == false {
-            captionPanel.showLoading("AI 处理中", anchorRect: selectedTextContextForCurrentSession?.anchorRect)
+            captionPanel.showLoading(
+                "AI 处理中",
+                anchorRect: contextQuestionAnchorRectForCurrentSession ?? selectedTextContextForCurrentSession?.anchorRect
+            )
         } else {
             captionPanel.showLoading("正在处理")
         }
@@ -1839,7 +1851,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rewriteTask = nil
         captionPanel.showLoading(
             selectedTextContextForCurrentSession?.text.isEmpty == false ? "AI 处理中" : "AI 整理中",
-            anchorRect: selectedTextContextForCurrentSession?.anchorRect
+            anchorRect: contextQuestionAnchorRectForCurrentSession ?? selectedTextContextForCurrentSession?.anchorRect
         )
         statusItem?.button?.title = "NexVoice 整理中"
         refreshMenuState()
@@ -1860,9 +1872,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var screenReplyInstructionAnchorRect: CGRect? {
         if let contextQuestionAnchorRectForCurrentSession {
             return contextQuestionAnchorRectForCurrentSession
-        }
-        if let selectedTextContext = selectedTextContextForCurrentSession {
-            return selectedTextContext.anchorRect
         }
         return nil
     }

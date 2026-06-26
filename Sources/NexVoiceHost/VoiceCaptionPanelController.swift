@@ -38,6 +38,7 @@ final class VoiceCaptionPanelController {
     private var copyFeedbackTask: Task<Void, Never>?
     private var outsideClickGlobalMonitor: Any?
     private var outsideClickLocalMonitor: Any?
+    var onContextualResultHidden: (() -> Void)?
 
     init() {
         panel = NSPanel(
@@ -716,17 +717,18 @@ final class VoiceCaptionPanelController {
         }
 
         let edgeInset = VoiceWaveformDisplayPolicy.screenEdgeInset
-        let gap: CGFloat = 8
+        let gap: CGFloat = 12
+        let prefersRightSide = anchorRect.maxX + gap + stageSize.width <= visibleFrame.maxX - edgeInset
+        let resolvedX = prefersRightSide
+            ? anchorRect.maxX + gap
+            : anchorRect.minX - stageSize.width - gap
         let x = clamp(
-            anchorRect.midX - stageSize.width / 2,
+            resolvedX,
             min: visibleFrame.minX + edgeInset,
             max: visibleFrame.maxX - stageSize.width - edgeInset
         )
         let rootHeight = min(max(visualSize.height, VoiceWaveformDisplayPolicy.compactPanelSize.height), stageSize.height)
-        let preferredRootY = anchorRect.minY - rootHeight - gap
-        let resolvedRootY = preferredRootY < visibleFrame.minY + edgeInset
-            ? anchorRect.maxY + gap
-            : preferredRootY
+        let resolvedRootY = anchorRect.midY - rootHeight / 2
         let rootY = clamp(
             resolvedRootY,
             min: visibleFrame.minY + edgeInset,
@@ -869,6 +871,7 @@ final class VoiceCaptionPanelController {
     }
 
     private func hideImmediately() {
+        let shouldNotifyContextualResultHidden = isInteractiveContextualResult
         hideWorkItem?.cancel()
         hideWorkItem = nil
         retryAction = nil
@@ -885,6 +888,9 @@ final class VoiceCaptionPanelController {
         panelResizeAnimationTask?.cancel()
         panelResizeAnimationTask = nil
         cancelTranscriptReveal()
+        if shouldNotifyContextualResultHidden {
+            onContextualResultHidden?()
+        }
         loadingStackView.isHidden = true
         loadingStackView.alphaValue = 0
         stackView.isHidden = false

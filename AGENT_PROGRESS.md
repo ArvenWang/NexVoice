@@ -13,6 +13,45 @@
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
+## 本轮追加（2026-06-27：固定双击问答气泡位置，收紧 OCR 框）
+
+- 用户复测反馈：
+  - 双击后的划词问答和鼠标问答，气泡位置仍会在不同状态间漂移。
+  - 期望两种问答都固定出现在鼠标旁边，并且同一次会话内波形、loading、回答都保持同一个位置。
+  - 鼠标 OCR 框选范围过大；期望只识别鼠标指向文字所在的自然段。
+  - OCR 框应在双击后尽早出现；回答消失时 OCR 框也应同步消失，不要额外停留几秒。
+- 本轮修复：
+  - 双击入口会立即冻结当时的鼠标位置；划词问答和鼠标问答都使用这个鼠标锚点，不再使用选区位置或后续移动后的鼠标位置。
+  - `VoiceCaptionPanelController` 的上下文浮层改为固定贴在鼠标右侧，靠近屏幕边缘时才切到左侧；不再因为波形、loading、回答高度不同而上下跳。
+  - 鼠标 OCR 高亮不再固定 8 秒自动隐藏；现在由回答气泡生命周期控制，回答气泡关闭时同步隐藏 OCR 框。
+  - 鼠标 OCR 文字块算法从“向周围同列模块扩展”改成“鼠标命中的文字行 + 上下紧邻且横向对齐的同自然段行”，并限制最多 8 行、限制最大高度，避免框住整块网页模块。
+- 当前行为：
+  - 双击右 Alt + 有选中文字：基于选中文字问答，但波形和回答固定出现在双击时鼠标旁边。
+  - 双击右 Alt + 无选中文字：基于双击时鼠标位置做 OCR；OCR 框尽早显示，范围更接近自然段；回答气泡消失时 OCR 框同步消失。
+- 已验证：
+  - `git diff --check` 通过。
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 通过。
+  - `swift test --disable-sandbox --quiet` 通过，150 个测试。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过。
+  - `codesign --verify --deep --strict --verbose=4 /Applications/NexVoice.app` 通过。
+  - `plutil -lint dist/NexVoice.app/Contents/Info.plist /Applications/NexVoice.app/Contents/Info.plist` 通过。
+  - `/Applications/NexVoice.app/Contents/Resources/NexVoiceEmbeddedConfig/DeepSeek.json` 和 `TencentCloudASR.json` 存在，未在日志或进展中展示密钥内容。
+  - `hdiutil verify dist/NexVoice-0.1.49-build50-stable-context-bubble-embedded-keys-20260627.dmg` 通过。
+- 已构建并安装新版：
+  - App：`dist/NexVoice.app`
+  - 安装路径：`/Applications/NexVoice.app`
+  - 当前运行 PID：`4174`
+  - 旧版备份：`dist/install-backups/NexVoice-20260627-012723.app`
+  - 新 DMG：`dist/NexVoice-0.1.49-build50-stable-context-bubble-embedded-keys-20260627.dmg`
+- Git：
+  - 本地提交：`93a4edf Stabilize context QA bubble placement`
+  - 当前 `main` 比 `origin/main` 多 6 个提交。
+  - 远端推送仍失败：当前机器无法读取 GitHub HTTPS 用户名，需要用户补 GitHub 凭据后再推送。
+- 需要用户复测：
+  - 双击划词问答：确认波形、loading、回答都在双击时鼠标旁边，不随选区位置漂移。
+  - 双击鼠标问答：确认 OCR 框范围接近自然段，不框住整块模块；回答气泡消失时 OCR 框同步消失。
+
 ## 本轮追加（2026-06-27：统一双击问答流程，并高亮鼠标 OCR 范围）
 
 - 用户确认本轮目标：

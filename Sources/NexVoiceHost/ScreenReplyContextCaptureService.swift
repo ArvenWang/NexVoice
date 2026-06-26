@@ -668,58 +668,81 @@ final class ScreenReplyContextCaptureService {
         }
 
         var includedIDs: Set<Int> = [anchor.id]
-        var region = anchor.rect.insetBy(dx: -18, dy: -10)
+        var region = anchor.rect
         var didChange = true
-        while didChange {
+        while didChange, includedIDs.count < 8 {
             didChange = false
-            for line in candidates where !includedIDs.contains(line.id) {
-                guard shouldIncludeMouseContextLine(
-                    line,
-                    anchor: anchor,
-                    currentRegion: region,
-                    imageWidth: imageWidth,
-                    imageHeight: imageHeight
-                ) else {
-                    continue
+            let nextLine = candidates
+                .filter { !includedIDs.contains($0.id) }
+                .compactMap { line -> (line: OCRLine, score: CGFloat)? in
+                    guard shouldIncludeMouseParagraphLine(
+                        line,
+                        anchor: anchor,
+                        currentRegion: region,
+                        imageWidth: imageWidth,
+                        imageHeight: imageHeight
+                    ) else {
+                        return nil
+                    }
+                    let score = verticalGap(between: region, and: line.rect)
+                        + abs(line.rect.midY - anchor.rect.midY) * 0.04
+                    return (line, score)
                 }
-                includedIDs.insert(line.id)
-                region = region.union(line.rect).insetBy(dx: -10, dy: -6)
+                .min { $0.score < $1.score }?
+                .line
+
+            if let nextLine {
+                includedIDs.insert(nextLine.id)
+                region = region.union(nextLine.rect)
                 didChange = true
             }
         }
 
-        let clampedRegion = region.intersection(CGRect(x: 0, y: 0, width: imageWidth, height: imageHeight))
+        let paddedRegion = region.insetBy(dx: -8, dy: -6)
+        let clampedRegion = paddedRegion.intersection(CGRect(x: 0, y: 0, width: imageWidth, height: imageHeight))
         guard !clampedRegion.isNull, !includedIDs.isEmpty else { return nil }
         return MouseFocusedContext(region: clampedRegion, includedLineIDs: includedIDs)
     }
 
-    private static func shouldIncludeMouseContextLine(
+    private static func shouldIncludeMouseParagraphLine(
         _ line: OCRLine,
         anchor: OCRLine,
         currentRegion: CGRect,
         imageWidth: CGFloat,
         imageHeight: CGFloat
     ) -> Bool {
-        let verticalPadding = max(46, min(96, imageHeight * 0.08))
-        let horizontalPadding = max(90, min(220, imageWidth * 0.16))
-        let searchRegion = currentRegion.insetBy(dx: -horizontalPadding, dy: -verticalPadding)
-        guard searchRegion.intersects(line.rect) else { return false }
+        let anchorLineHeight = max(1, anchor.rect.height)
+        let gap = verticalGap(between: currentRegion, and: line.rect)
+        guard gap <= max(8, min(24, anchorLineHeight * 1.2)) else {
+            return false
+        }
 
         let expanded = currentRegion.union(line.rect)
-        guard expanded.width <= max(360, imageWidth * 0.72),
-              expanded.height <= max(180, imageHeight * 0.46) else {
+        guard expanded.width <= min(imageWidth * 0.82, max(anchor.rect.width * 1.35, 520)),
+              expanded.height <= min(imageHeight * 0.28, max(anchorLineHeight * 8, 180)) else {
             return false
         }
 
         let overlapWidth = max(0, min(currentRegion.maxX, line.rect.maxX) - max(currentRegion.minX, line.rect.minX))
         let overlapRatio = overlapWidth / max(1, min(currentRegion.width, line.rect.width))
-        let centerDistance = abs(line.rect.midX - anchor.rect.midX)
         let leftEdgeDistance = abs(line.rect.minX - anchor.rect.minX)
+        let centerDistance = abs(line.rect.midX - anchor.rect.midX)
         let rightEdgeDistance = abs(line.rect.maxX - anchor.rect.maxX)
-        return overlapRatio >= 0.16
-            || centerDistance <= max(120, currentRegion.width * 0.55)
-            || leftEdgeDistance <= 72
-            || rightEdgeDistance <= 96
+
+        return overlapRatio >= 0.32
+            || leftEdgeDistance <= max(36, anchorLineHeight * 2.2)
+            || rightEdgeDistance <= max(52, anchorLineHeight * 2.8)
+            || centerDistance <= max(120, anchor.rect.width * 0.35)
+    }
+
+    private static func verticalGap(between lhs: CGRect, and rhs: CGRect) -> CGFloat {
+        if lhs.maxY < rhs.minY {
+            return rhs.minY - lhs.maxY
+        }
+        if rhs.maxY < lhs.minY {
+            return lhs.minY - rhs.maxY
+        }
+        return 0
     }
 
     private static func distance(from point: CGPoint, to rect: CGRect) -> CGFloat {
