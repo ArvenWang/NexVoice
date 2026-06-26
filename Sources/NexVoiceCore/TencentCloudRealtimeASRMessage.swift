@@ -90,6 +90,19 @@ public struct TencentCloudRealtimeTranscriptBuffer: Sendable {
         case .recognizing:
             latestUnstableSegment = (result.index, result.voiceText)
         case .ended:
+            let nextText = result.voiceText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let existingText = stableSegments[result.index] {
+                let existingTrimmed = existingText.trimmingCharacters(in: .whitespacesAndNewlines)
+                // 腾讯云偶尔会在同一个 index 后补一条空的 ended 分片。
+                // 这种分片不能覆盖更长的稳定文本，否则最终只会保留前半段。
+                if nextText.isEmpty && !existingTrimmed.isEmpty {
+                    break
+                }
+                if !existingTrimmed.isEmpty,
+                   nextText.count < max(4, existingTrimmed.count / 2) {
+                    break
+                }
+            }
             stableSegments[result.index] = result.voiceText
             if latestUnstableSegment?.index == result.index {
                 latestUnstableSegment = nil

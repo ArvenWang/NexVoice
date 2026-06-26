@@ -28,7 +28,7 @@ final class MouseContextCaptureService {
     }
 
     static func previewRegion(around mouseLocation: CGPoint) -> CGRect {
-        screenRegion(centeredAt: mouseLocation, size: CGSize(width: 520, height: 300))
+        screenRegion(centeredAt: mouseLocation, size: CGSize(width: 900, height: 380))
     }
 
     func capture(
@@ -45,12 +45,12 @@ final class MouseContextCaptureService {
         let captureID = UUID().uuidString
         let attempts = [
             CaptureAttempt(
-                region: Self.screenRegion(centeredAt: mouseScreenLocation, size: CGSize(width: 520, height: 300)),
-                maximumAnchorDistance: 96
+                region: Self.screenRegion(centeredAt: mouseScreenLocation, size: CGSize(width: 900, height: 380)),
+                maximumAnchorDistance: 140
             ),
             CaptureAttempt(
-                region: Self.screenRegion(centeredAt: mouseScreenLocation, size: CGSize(width: 820, height: 460)),
-                maximumAnchorDistance: 180
+                region: Self.screenRegion(centeredAt: mouseScreenLocation, size: CGSize(width: 1_280, height: 620)),
+                maximumAnchorDistance: 240
             )
         ]
 
@@ -234,8 +234,8 @@ final class MouseContextCaptureService {
                     )
                 }
             }
-            request.recognitionLevel = .fast
-            request.usesLanguageCorrection = false
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = true
             request.recognitionLanguages = ["zh-Hans", "zh-Hant", "en-US"]
 
             let handler = VNImageRequestHandler(cgImage: image, options: [:])
@@ -320,8 +320,8 @@ final class MouseContextCaptureService {
         }
 
         let expanded = currentRegion.union(line)
-        guard expanded.height <= max(96, anchorLineHeight * 6.5),
-              expanded.width <= max(anchor.width * 1.45, 720) else {
+        guard expanded.height <= max(120, anchorLineHeight * 7.5),
+              expanded.width <= max(anchor.width * 1.65, 1_080) else {
             return false
         }
 

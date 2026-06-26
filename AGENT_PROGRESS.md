@@ -13,6 +13,47 @@
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
+## 本轮追加（2026-06-27：修复鼠标 OCR 框偏小、ASR 截断、双击后立刻结束）
+
+- 用户复测反馈：
+  - OCR 框明显比识别到的文字小，且有很多识别不出来的情况。
+  - 单次快捷键普通语音输入中途像被打断，最终只显示前面一小段。
+  - 企业微信图片窗口中双击后仍可能什么都不出现，没有稳定进入鼠标回答状态。
+- 日志定位：
+  - `ScreenReply.jsonl` 中新链路已进入 `mouse_visual_captured`，但例子里长句被 OCR 成 `What books would you recommend for learning Machine Lea`，说明鼠标屏幕截图取样区域太窄，文字尾部落在截图边缘外。
+  - `TencentCloudASR.jsonl` 中 session `1292334A-4FEB-48B7-B55A-182641563988` 在 29 秒时已有 92 字完整识别，但随后同一分片又收到一条空的 `sliceType=2` 稳定结果，导致最终文本被覆盖成 20 字。
+  - 企业微信相关记录里，问答录音启动后 0.14-0.15 秒就出现 `finish_requested`，随后 `no_speech`；这不是 OCR 慢，而是双击残留事件把刚开始的上下文问答录音立刻结束了。
+- 本轮修复：
+  - 鼠标问答仍保持纯视觉逻辑，但屏幕 OCR 取样区域从 `520x300` 扩到 `900x380`，兜底扩展到 `1280x620`；最终上下文仍只取鼠标附近自然段，不回到窗口扫描。
+  - 鼠标 OCR 从 Vision `.fast` 改为 `.accurate` 并开启语言纠错，优先提高截图中文字识别完整度。
+  - 修复腾讯云 ASR 分片合并：同一个 index 已有较长稳定文本时，后来的空分片或明显过短分片不能覆盖它。
+  - 增加回归测试，覆盖“腾讯云后补空 ended 分片不应截断完整识别文本”的场景。
+  - 上下文问答启动后 0.65 秒内忽略误触发的结束录音请求，并写入 `context_question_early_finish_ignored` 日志；普通单击语音输入不受影响。
+- 已验证：
+  - `git diff --check` 通过。
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 通过。
+  - `swift test --disable-sandbox --quiet` 通过，151 个测试。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=2 dist/NexVoice.app` 通过。
+  - `codesign --verify --deep --strict --verbose=2 /Applications/NexVoice.app` 通过。
+  - `plutil -lint dist/NexVoice.app/Contents/Info.plist /Applications/NexVoice.app/Contents/Info.plist` 通过。
+  - `/Applications/NexVoice.app/Contents/Resources/NexVoiceEmbeddedConfig/DeepSeek.json` 和 `TencentCloudASR.json` 存在，未在日志或进展中展示密钥内容。
+  - `hdiutil verify dist/NexVoice-0.1.53-build54-mouse-ocr-asr-fix-embedded-keys-20260627.dmg` 通过。
+- 已构建并安装新版：
+  - App：`dist/NexVoice.app`
+  - 安装路径：`/Applications/NexVoice.app`
+  - 当前运行 PID：`12318`
+  - 旧版备份：`dist/install-backups/20260627-022612-NexVoice.app`
+  - 新 DMG：`dist/NexVoice-0.1.53-build54-mouse-ocr-asr-fix-embedded-keys-20260627.dmg`
+- Git：
+  - 本轮本地提交：`Stabilize mouse OCR and ASR sessions`
+  - 当前 `main` 比 `origin/main` 多 10 个提交。
+  - 远端推送仍失败：`fatal: could not read Username for 'https://github.com': Device not configured`，需要用户补 GitHub HTTPS 凭据后再推送。
+- 需要用户复测：
+  - 网页长句或图片中文字上双击，OCR 框是否能覆盖完整句子而不是半截。
+  - 普通单击语音输入长句，是否不再被后续空分片截断成前半句。
+  - 企业微信图片窗口中双击后，是否稳定显示 OCR 框和语音波形；如仍没反应，看 `ScreenReply.jsonl` 是否出现 `context_question_early_finish_ignored`。
+
 ## 本轮追加（2026-06-27：鼠标问答改为独立纯视觉 OCR 链路）
 
 - 用户要求：

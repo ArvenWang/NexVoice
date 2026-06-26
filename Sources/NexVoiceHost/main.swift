@@ -73,6 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pendingScreenReplyVoiceInstruction: String?
     private var contextQuestionCaptureIDForCurrentSession: String?
     private var contextQuestionAnchorRectForCurrentSession: CGRect?
+    private var contextQuestionStartedAt: Date?
     private var didInsertCurrentSession = false
     private var isCurrentSessionCancelled = false
     private var insertedTextPreview: String?
@@ -88,6 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var permissionRefreshWorkItem: DispatchWorkItem?
     private var activeDictionaryLearningTasks = 0
     private var dictionaryLearningResetWorkItem: DispatchWorkItem?
+    private static let contextQuestionMinimumRecordDuration: TimeInterval = 0.65
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -504,6 +506,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let captureID = UUID().uuidString
         contextQuestionCaptureIDForCurrentSession = captureID
         contextQuestionAnchorRectForCurrentSession = anchorRect
+        contextQuestionStartedAt = Date()
         didDetectScreenReplyVoiceInstruction = false
         dictionaryLearningMonitor.cancel()
         activeDictionaryLearningTasks = 0
@@ -597,6 +600,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         contextCaptureInteractionModeForCurrentSession = .focusedInputScreenReply
         contextQuestionCaptureIDForCurrentSession = nil
         contextQuestionAnchorRectForCurrentSession = nil
+        contextQuestionStartedAt = nil
         didDetectScreenReplyVoiceInstruction = false
         dictionaryLearningMonitor.cancel()
         contextCaptureTask?.cancel()
@@ -720,6 +724,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         contextCaptureInteractionModeForCurrentSession = .mouseContextQuestion
         contextQuestionCaptureIDForCurrentSession = captureID
         contextQuestionAnchorRectForCurrentSession = anchorRect
+        contextQuestionStartedAt = Date()
         didDetectScreenReplyVoiceInstruction = false
         dictionaryLearningMonitor.cancel()
         activeDictionaryLearningTasks = 0
@@ -826,6 +831,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         contextCaptureInteractionModeForCurrentSession = nil
         contextQuestionCaptureIDForCurrentSession = nil
         contextQuestionAnchorRectForCurrentSession = nil
+        contextQuestionStartedAt = nil
         didDetectScreenReplyVoiceInstruction = false
         dictionaryLearningMonitor.cancel()
         activeDictionaryLearningTasks = 0
@@ -1222,6 +1228,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         contextCaptureInteractionModeForCurrentSession = nil
         contextQuestionCaptureIDForCurrentSession = nil
         contextQuestionAnchorRectForCurrentSession = nil
+        contextQuestionStartedAt = nil
         contextCaptureTask?.cancel()
         contextCaptureTask = nil
         isRewritingCurrentSession = false
@@ -1250,6 +1257,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         contextCaptureInteractionModeForCurrentSession = nil
         contextQuestionCaptureIDForCurrentSession = nil
         contextQuestionAnchorRectForCurrentSession = nil
+        contextQuestionStartedAt = nil
         contextCaptureTask?.cancel()
         contextCaptureTask = nil
         let hadEditableSelection = hasEditableSelectionForCurrentSession
@@ -1618,6 +1626,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hasEditableSelectionForCurrentSession = false
         contextQuestionCaptureIDForCurrentSession = nil
         contextQuestionAnchorRectForCurrentSession = nil
+        contextQuestionStartedAt = nil
         contextCaptureTask?.cancel()
         contextCaptureTask = nil
         ocrRegionOverlay.hide()
@@ -1678,6 +1687,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         contextCaptureInteractionModeForCurrentSession = nil
         contextQuestionCaptureIDForCurrentSession = nil
         contextQuestionAnchorRectForCurrentSession = nil
+        contextQuestionStartedAt = nil
         contextCaptureTask?.cancel()
         contextCaptureTask = nil
         rewriteTask?.cancel()
@@ -1709,9 +1719,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pendingScreenReplyVoiceInstruction = nil
         contextQuestionCaptureIDForCurrentSession = nil
         contextQuestionAnchorRectForCurrentSession = nil
+        contextQuestionStartedAt = nil
     }
 
     private func stopTranscription() {
+        if let contextQuestionStartedAt,
+           contextCaptureInteractionModeForCurrentSession == .mouseContextQuestion
+            || contextCaptureInteractionModeForCurrentSession == .selectedTextQuestion {
+            let elapsed = Date().timeIntervalSince(contextQuestionStartedAt)
+            if elapsed < Self.contextQuestionMinimumRecordDuration {
+                let captureID = contextQuestionCaptureIDForCurrentSession ?? UUID().uuidString
+                Task {
+                    await ScreenReplyDiagnosticsLogger.shared.log(
+                        ScreenReplyDiagnosticEvent(
+                            captureID: captureID,
+                            event: "context_question_early_finish_ignored",
+                            interactionMode: contextCaptureInteractionModeForCurrentSession?.rawValue,
+                            appName: targetApplicationForCurrentSession?.localizedName,
+                            bundleIdentifier: targetApplicationForCurrentSession?.bundleIdentifier,
+                            errorMessage: "Ignored finish \(String(format: "%.0f", elapsed * 1_000))ms after context question start."
+                        )
+                    )
+                }
+                return
+            }
+        }
+
         if isScreenReplyInstructionSession {
             let message = "AI 输入中"
             captionPanel.showLoading(message, anchorRect: screenReplyInstructionAnchorRect)
@@ -1761,6 +1794,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         contextCaptureInteractionModeForCurrentSession = nil
         contextQuestionCaptureIDForCurrentSession = nil
         contextQuestionAnchorRectForCurrentSession = nil
+        contextQuestionStartedAt = nil
         didDetectScreenReplyVoiceInstruction = false
         dictionaryLearningMonitor.cancel()
         activeDictionaryLearningTasks = 0
@@ -1798,6 +1832,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             contextCaptureInteractionModeForCurrentSession = nil
             contextQuestionCaptureIDForCurrentSession = nil
             contextQuestionAnchorRectForCurrentSession = nil
+            contextQuestionStartedAt = nil
             contextCaptureTask?.cancel()
             contextCaptureTask = nil
             ocrRegionOverlay.hide()
