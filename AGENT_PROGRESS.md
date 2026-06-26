@@ -13,6 +13,44 @@
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
+## 本轮追加（2026-06-27：调整 OCR 高亮层级、样式和范围）
+
+- 用户复测反馈：
+  - OCR 高亮框不应该盖住回答气泡；气泡层应该永远在最上面。
+  - OCR 高亮应高于当前焦点窗口，尤其是企业微信图片预览窗口，但低于气泡。
+  - OCR 高亮样式不需要外描边，只保留内部半透明颜色。
+  - OCR 判定范围仍略大，临时框和最终框都需要再收紧。
+- 本轮修复：
+  - `OCRRegionOverlayController` 的窗口层级改为 `statusBar - 1`：高于普通窗口和大多数浮动图片窗口，但低于回答气泡的 `statusBar` 层。
+  - OCR 高亮去掉蓝色描边，只保留半透明蓝色填充，并减小外扩 padding。
+  - 鼠标 OCR 裁剪区域从较大的窗口局部区域进一步缩小，减少远处文字进入 OCR 候选。
+  - 鼠标命中文字自然段最多扩展 5 行，并增加最终高亮宽高上限，避免长行或整块卡片被框得过大。
+  - 双击后立即出现的临时候选框从 `520x280` 缩小到 `380x190`。
+- 已验证：
+  - `git diff --check` 通过。
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 通过。
+  - `swift test --disable-sandbox --quiet` 通过，150 个测试。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过。
+  - `codesign --verify --deep --strict --verbose=4 /Applications/NexVoice.app` 通过。
+  - `plutil -lint dist/NexVoice.app/Contents/Info.plist /Applications/NexVoice.app/Contents/Info.plist` 通过。
+  - `/Applications/NexVoice.app/Contents/Resources/NexVoiceEmbeddedConfig/DeepSeek.json` 和 `TencentCloudASR.json` 存在，未在日志或进展中展示密钥内容。
+  - `hdiutil verify dist/NexVoice-0.1.51-build52-ocr-overlay-layer-style-embedded-keys-20260627.dmg` 通过。
+- 已构建并安装新版：
+  - App：`dist/NexVoice.app`
+  - 安装路径：`/Applications/NexVoice.app`
+  - 当前运行 PID：`42316`
+  - 旧版备份：`dist/install-backups/NexVoice-20260627-015204.app`
+  - 新 DMG：`dist/NexVoice-0.1.51-build52-ocr-overlay-layer-style-embedded-keys-20260627.dmg`
+- Git：
+  - 本地提交：`35b028b Refine OCR overlay layering`
+  - 当前 `main` 比 `origin/main` 多 8 个提交。
+  - 远端推送仍失败：当前机器无法读取 GitHub HTTPS 用户名，需要用户补 GitHub 凭据后再推送。
+- 需要用户复测：
+  - 回答气泡出现时，OCR 高亮应在气泡下面，不再盖住气泡。
+  - 企业微信图片预览窗口中，OCR 高亮应能盖在图片窗口上方。
+  - OCR 高亮应只显示填充色，不再有外描边。
+
 ## 本轮追加（2026-06-27：降低鼠标 OCR 延迟，修正 OCR 框定位）
 
 - 用户复测反馈：

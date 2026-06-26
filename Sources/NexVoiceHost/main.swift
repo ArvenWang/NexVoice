@@ -1878,7 +1878,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func preliminaryMouseOCRRegion(around anchorRect: CGRect) -> CGRect {
-        let size = CGSize(width: 520, height: 280)
+        let size = CGSize(width: 380, height: 190)
         let rawRegion = CGRect(
             x: anchorRect.midX - size.width / 2,
             y: anchorRect.midY - size.height / 2,

@@ -702,8 +702,8 @@ final class ScreenReplyContextCaptureService {
         imageWidth: CGFloat,
         imageHeight: CGFloat
     ) -> CGRect {
-        let width = min(imageWidth, max(760, min(1_420, imageWidth * 0.52)))
-        let height = min(imageHeight, max(520, min(820, imageHeight * 0.42)))
+        let width = min(imageWidth, max(560, min(1_080, imageWidth * 0.38)))
+        let height = min(imageHeight, max(360, min(620, imageHeight * 0.30)))
         let x = min(max(0, point.x - width / 2), max(0, imageWidth - width))
         let y = min(max(0, point.y - height / 2), max(0, imageHeight - height))
         return CGRect(x: x, y: y, width: width, height: height)
@@ -796,7 +796,7 @@ final class ScreenReplyContextCaptureService {
         var includedIDs: Set<Int> = [anchor.id]
         var region = anchor.rect
         var didChange = true
-        while didChange, includedIDs.count < 8 {
+        while didChange, includedIDs.count < 5 {
             didChange = false
             let nextLine = candidates
                 .filter { !includedIDs.contains($0.id) }
@@ -824,7 +824,14 @@ final class ScreenReplyContextCaptureService {
             }
         }
 
-        let paddedRegion = region.insetBy(dx: -8, dy: -6)
+        let constrainedRegion = constrainMouseRegion(
+            region,
+            around: mouseLocation,
+            imageWidth: imageWidth,
+            imageHeight: imageHeight,
+            anchorLineHeight: anchor.rect.height
+        )
+        let paddedRegion = constrainedRegion.insetBy(dx: -5, dy: -4)
         let clampedRegion = paddedRegion.intersection(CGRect(x: 0, y: 0, width: imageWidth, height: imageHeight))
         guard !clampedRegion.isNull, !includedIDs.isEmpty else { return nil }
         return MouseFocusedContext(region: clampedRegion, includedLineIDs: includedIDs)
@@ -844,8 +851,8 @@ final class ScreenReplyContextCaptureService {
         }
 
         let expanded = currentRegion.union(line.rect)
-        guard expanded.width <= min(imageWidth * 0.82, max(anchor.rect.width * 1.35, 520)),
-              expanded.height <= min(imageHeight * 0.28, max(anchorLineHeight * 8, 180)) else {
+        guard expanded.width <= min(imageWidth * 0.54, max(anchor.rect.width * 1.18, 620)),
+              expanded.height <= min(imageHeight * 0.18, max(anchorLineHeight * 5.5, 130)) else {
             return false
         }
 
@@ -859,6 +866,29 @@ final class ScreenReplyContextCaptureService {
             || leftEdgeDistance <= max(36, anchorLineHeight * 2.2)
             || rightEdgeDistance <= max(52, anchorLineHeight * 2.8)
             || centerDistance <= max(120, anchor.rect.width * 0.35)
+    }
+
+    private static func constrainMouseRegion(
+        _ region: CGRect,
+        around mouseLocation: CGPoint,
+        imageWidth: CGFloat,
+        imageHeight: CGFloat,
+        anchorLineHeight: CGFloat
+    ) -> CGRect {
+        let maxWidth = min(imageWidth * 0.46, max(520, min(980, anchorLineHeight * 18)))
+        let maxHeight = min(imageHeight * 0.16, max(80, min(180, anchorLineHeight * 5.2)))
+        let constrainedWidth = min(region.width, maxWidth)
+        let constrainedHeight = min(region.height, maxHeight)
+        let imageRect = CGRect(x: 0, y: 0, width: imageWidth, height: imageHeight)
+        let xRangeMin = region.minX
+        let xRangeMax = max(xRangeMin, region.maxX - constrainedWidth)
+        let yRangeMin = region.minY
+        let yRangeMax = max(yRangeMin, region.maxY - constrainedHeight)
+        let x = min(max(mouseLocation.x - constrainedWidth / 2, xRangeMin), xRangeMax)
+        let y = min(max(mouseLocation.y - constrainedHeight / 2, yRangeMin), yRangeMax)
+        let constrained = CGRect(x: x, y: y, width: constrainedWidth, height: constrainedHeight)
+        let clamped = constrained.intersection(imageRect)
+        return clamped.isNull ? region.intersection(imageRect) : clamped
     }
 
     private static func verticalGap(between lhs: CGRect, and rhs: CGRect) -> CGFloat {
