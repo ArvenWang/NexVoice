@@ -13,6 +13,51 @@
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
+## 本轮追加（2026-06-27：降低鼠标 OCR 延迟，修正 OCR 框定位）
+
+- 用户复测反馈：
+  - 鼠标问答双击后 OCR 框不是实时出现，经常要等 1-2 秒。
+  - OCR 框定位不稳定，有时框在空白处或只框到一小块无关内容。
+- 日志和代码定位：
+  - 旧流程是双击后先截取整个前台窗口，再对整张窗口截图跑 Vision OCR，最后才显示 OCR 框；窗口文字越多，框出现越慢。
+  - 鼠标屏幕坐标和 Vision OCR 图片坐标的 Y 轴方向不一致；旧代码直接换算，导致鼠标附近搜索可能落到上下错位的位置。
+  - 鼠标问答找不到可靠文字时，旧链路仍可能先退回 replyRegion，容易拿到大范围或远处内容。
+- 本轮修复：
+  - 鼠标问答双击后立即显示一个鼠标附近临时候选框，给用户即时反馈。
+  - 鼠标 OCR 不再识别整个窗口；现在只裁剪双击鼠标附近区域做 OCR，再把结果映射回原窗口坐标。
+  - 鼠标裁剪 OCR 使用 Vision `.fast` 且关闭语言纠错；普通看屏回复仍保留 `.accurate`。
+  - 修正鼠标专用坐标换算：AppKit 鼠标屏幕点 -> Quartz 窗口坐标 -> OCR 图片坐标；OCR 框回屏幕时再转回 AppKit 坐标。
+  - 鼠标问答如果裁剪区域里没有可靠命中文字，直接返回“未识别到鼠标附近文字”，不再退回整屏/大区域。
+  - `ScreenReply.jsonl` 增加定位和耗时字段：`windowBounds`、`mouseScreenLocation`、`mouseImageLocation`、`ocrCropRegion`、`captureDurationMs`、`ocrDurationMs`；同时新增 `mouse_region_missed` 事件，方便排查。
+- 当前行为：
+  - 双击无划词后，屏幕会立即出现鼠标附近候选框。
+  - OCR 完成后，候选框会缩到真实命中的文字自然段。
+  - 如果鼠标附近没有可靠文字，候选框会隐藏并提示未识别到鼠标附近文字。
+- 已验证：
+  - `git diff --check` 通过。
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 通过。
+  - `swift test --disable-sandbox --quiet` 通过，150 个测试。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过。
+  - `codesign --verify --deep --strict --verbose=4 /Applications/NexVoice.app` 通过。
+  - `plutil -lint dist/NexVoice.app/Contents/Info.plist /Applications/NexVoice.app/Contents/Info.plist` 通过。
+  - `/Applications/NexVoice.app/Contents/Resources/NexVoiceEmbeddedConfig/DeepSeek.json` 和 `TencentCloudASR.json` 存在，未在日志或进展中展示密钥内容。
+  - `hdiutil verify dist/NexVoice-0.1.50-build51-fast-mouse-ocr-embedded-keys-20260627.dmg` 通过。
+- 已构建并安装新版：
+  - App：`dist/NexVoice.app`
+  - 安装路径：`/Applications/NexVoice.app`
+  - 当前运行 PID：`26918`
+  - 旧版备份：`dist/install-backups/NexVoice-20260627-014129.app`
+  - 新 DMG：`dist/NexVoice-0.1.50-build51-fast-mouse-ocr-embedded-keys-20260627.dmg`
+- Git：
+  - 本地提交：`656b33c Speed up mouse OCR context capture`
+  - 当前 `main` 比 `origin/main` 多 7 个提交。
+  - 远端推送仍失败：当前机器无法读取 GitHub HTTPS 用户名，需要用户补 GitHub 凭据后再推送。
+- 需要用户复测：
+  - 无划词双击鼠标问答：确认候选框是否立即出现。
+  - 在网页/X/图片文字上测试：确认最终 OCR 框是否贴近鼠标指向的文字自然段。
+  - 如仍偏移，看 `ScreenReply.jsonl` 中同一 `captureID` 的 `mouseScreenLocation`、`mouseImageLocation`、`ocrCropRegion`、`mouseRegionInScreen` 和 `ocrDurationMs`。
+
 ## 本轮追加（2026-06-27：固定双击问答气泡位置，收紧 OCR 框）
 
 - 用户复测反馈：

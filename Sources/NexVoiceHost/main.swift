@@ -729,6 +729,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rewriteTask?.cancel()
         rewriteTask = nil
         ocrRegionOverlay.hide()
+        ocrRegionOverlay.show(region: preliminaryMouseOCRRegion(around: anchorRect))
         captionPanel.showOverlay(anchorRect: anchorRect)
         statusItem?.button?.title = "NexVoice 鼠标问答中"
         refreshMenuState()
@@ -1874,6 +1875,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return contextQuestionAnchorRectForCurrentSession
         }
         return nil
+    }
+
+    private func preliminaryMouseOCRRegion(around anchorRect: CGRect) -> CGRect {
+        let size = CGSize(width: 520, height: 280)
+        let rawRegion = CGRect(
+            x: anchorRect.midX - size.width / 2,
+            y: anchorRect.midY - size.height / 2,
+            width: size.width,
+            height: size.height
+        )
+        guard let visibleFrame = (NSScreen.screens.first { $0.frame.contains(anchorRect.origin) } ?? NSScreen.main)?.visibleFrame else {
+            return rawRegion
+        }
+        return CGRect(
+            x: min(max(rawRegion.minX, visibleFrame.minX), max(visibleFrame.minX, visibleFrame.maxX - rawRegion.width)),
+            y: min(max(rawRegion.minY, visibleFrame.minY), max(visibleFrame.minY, visibleFrame.maxY - rawRegion.height)),
+            width: min(rawRegion.width, visibleFrame.width),
+            height: min(rawRegion.height, visibleFrame.height)
+        )
     }
 
     @objc private func quit() {

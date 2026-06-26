@@ -54,11 +54,17 @@ struct ScreenReplyDiagnosticEvent: Encodable {
     let windowTitle: String?
     let imageWidth: Int?
     let imageHeight: Int?
+    let windowBounds: ScreenReplyDiagnosticRect?
     let inputFrame: ScreenReplyDiagnosticRect?
     let replyRegion: ScreenReplyDiagnosticRect?
+    let mouseScreenLocation: ScreenReplyDiagnosticPoint?
     let mouseLocation: ScreenReplyDiagnosticPoint?
+    let mouseImageLocation: ScreenReplyDiagnosticPoint?
+    let ocrCropRegion: ScreenReplyDiagnosticRect?
     let mouseRegion: ScreenReplyDiagnosticRect?
     let mouseRegionInScreen: ScreenReplyDiagnosticRect?
+    let captureDurationMs: Double?
+    let ocrDurationMs: Double?
     let lineCount: Int?
     let visibleTextCharacters: Int?
     let structuredMessagesCharacters: Int?
@@ -84,11 +90,17 @@ struct ScreenReplyDiagnosticEvent: Encodable {
         windowTitle: String? = nil,
         imageWidth: Int? = nil,
         imageHeight: Int? = nil,
+        windowBounds: CGRect? = nil,
         inputFrame: CGRect? = nil,
         replyRegion: CGRect? = nil,
+        mouseScreenLocation: CGPoint? = nil,
         mouseLocation: CGPoint? = nil,
+        mouseImageLocation: CGPoint? = nil,
+        ocrCropRegion: CGRect? = nil,
         mouseRegion: CGRect? = nil,
         mouseRegionInScreen: CGRect? = nil,
+        captureDurationMs: Double? = nil,
+        ocrDurationMs: Double? = nil,
         lineCount: Int? = nil,
         visibleText: String? = nil,
         structuredMessages: String? = nil,
@@ -109,11 +121,17 @@ struct ScreenReplyDiagnosticEvent: Encodable {
         self.windowTitle = windowTitle
         self.imageWidth = imageWidth
         self.imageHeight = imageHeight
+        self.windowBounds = windowBounds.map(ScreenReplyDiagnosticRect.init)
         self.inputFrame = inputFrame.map(ScreenReplyDiagnosticRect.init)
         self.replyRegion = replyRegion.map(ScreenReplyDiagnosticRect.init)
+        self.mouseScreenLocation = mouseScreenLocation.map(ScreenReplyDiagnosticPoint.init)
         self.mouseLocation = mouseLocation.map(ScreenReplyDiagnosticPoint.init)
+        self.mouseImageLocation = mouseImageLocation.map(ScreenReplyDiagnosticPoint.init)
+        self.ocrCropRegion = ocrCropRegion.map(ScreenReplyDiagnosticRect.init)
         self.mouseRegion = mouseRegion.map(ScreenReplyDiagnosticRect.init)
         self.mouseRegionInScreen = mouseRegionInScreen.map(ScreenReplyDiagnosticRect.init)
+        self.captureDurationMs = captureDurationMs
+        self.ocrDurationMs = ocrDurationMs
         self.lineCount = lineCount
         self.visibleTextCharacters = visibleText?.count
         self.structuredMessagesCharacters = structuredMessages?.count

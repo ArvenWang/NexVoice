@@ -80,11 +80,30 @@ final class ScreenReplyContextCaptureService {
         guard let window = Self.bestVisibleWindow(for: application.processIdentifier) else {
             throw ScreenReplyCaptureError.noVisibleWindow
         }
+        let captureStartedAt = Date()
         guard let image = Self.capture(windowID: window.id) else {
             throw ScreenReplyCaptureError.captureFailed
         }
+        let captureDurationMs = Date().timeIntervalSince(captureStartedAt) * 1_000
 
-        let lines = try await Self.recognizeText(in: image)
+        let mouseLocationInWindow = mouseScreenLocation.flatMap {
+            Self.mouseScreenPointInWindow(
+                $0,
+                windowBounds: window.bounds,
+                imageWidth: CGFloat(image.width),
+                imageHeight: CGFloat(image.height)
+            )
+        }
+        let mouseCropRegion = mouseLocationInWindow.map {
+            Self.mouseOCRCropRegion(
+                centeredAt: $0,
+                imageWidth: CGFloat(image.width),
+                imageHeight: CGFloat(image.height)
+            )
+        }
+
+        let ocrResult = try await Self.recognizeText(in: image, cropRegion: mouseCropRegion)
+        let lines = ocrResult.lines
         guard !lines.isEmpty else {
             throw ScreenReplyCaptureError.noRecognizedText
         }
@@ -117,14 +136,6 @@ final class ScreenReplyContextCaptureService {
                 bundleIdentifier: application.bundleIdentifier
             )
         }
-        let mouseLocationInWindow = mouseScreenLocation.flatMap {
-            Self.screenPointInWindow(
-                $0,
-                windowBounds: window.bounds,
-                imageWidth: CGFloat(image.width),
-                imageHeight: CGFloat(image.height)
-            )
-        }
         let mouseContext = mouseLocationInWindow.flatMap {
             Self.mouseFocusedContext(
                 from: lines,
@@ -133,6 +144,39 @@ final class ScreenReplyContextCaptureService {
                 imageHeight: CGFloat(image.height),
                 bundleIdentifier: application.bundleIdentifier
             )
+        }
+        if mouseScreenLocation != nil, mouseContext == nil {
+            let visibleText = lines.map(\.text).joined(separator: "\n")
+            await ScreenReplyDiagnosticsLogger.shared.log(
+                ScreenReplyDiagnosticEvent(
+                    captureID: UUID().uuidString,
+                    event: "mouse_region_missed",
+                    interactionMode: interactionMode,
+                    appName: application.localizedName,
+                    bundleIdentifier: application.bundleIdentifier,
+                    windowTitle: window.title,
+                    imageWidth: image.width,
+                    imageHeight: image.height,
+                    windowBounds: window.bounds,
+                    mouseScreenLocation: mouseScreenLocation,
+                    mouseLocation: mouseLocationInWindow,
+                    mouseImageLocation: mouseLocationInWindow,
+                    ocrCropRegion: ocrResult.cropRegion,
+                    captureDurationMs: captureDurationMs,
+                    ocrDurationMs: ocrResult.durationMs,
+                    lineCount: lines.count,
+                    visibleText: visibleText,
+                    lines: Self.capturedLines(
+                        from: lines,
+                        imageWidth: CGFloat(image.width),
+                        imageHeight: CGFloat(image.height),
+                        bundleIdentifier: application.bundleIdentifier,
+                        replyRegion: nil,
+                        mouseIncludedLineIDs: []
+                    )
+                )
+            )
+            throw ScreenReplyCaptureError.noMouseRegionText
         }
         let captureMode: ScreenReplyCaptureMode = mouseContext == nil ? .replyRegion : .mouseRegion
         let capturedLines = Self.capturedLines(
@@ -165,11 +209,17 @@ final class ScreenReplyContextCaptureService {
                 windowTitle: window.title,
                 imageWidth: image.width,
                 imageHeight: image.height,
+                windowBounds: window.bounds,
                 inputFrame: inputFrameInWindow,
                 replyRegion: replyRegion,
+                mouseScreenLocation: mouseScreenLocation,
                 mouseLocation: mouseLocationInWindow,
+                mouseImageLocation: mouseLocationInWindow,
+                ocrCropRegion: ocrResult.cropRegion,
                 mouseRegion: mouseContext?.region,
                 mouseRegionInScreen: mouseRegionInScreen,
+                captureDurationMs: captureDurationMs,
+                ocrDurationMs: ocrResult.durationMs,
                 lineCount: lines.count,
                 visibleText: visibleText,
                 structuredMessages: structuredMessages,
@@ -220,6 +270,12 @@ final class ScreenReplyContextCaptureService {
         let includedLineIDs: Set<Int>
     }
 
+    private struct OCRResult: Sendable {
+        let lines: [OCRLine]
+        let cropRegion: CGRect?
+        let durationMs: Double
+    }
+
     private static func bestVisibleWindow(for processIdentifier: pid_t) -> WindowInfo? {
         guard let windowList = CGWindowListCopyWindowInfo(
             [.optionOnScreenOnly, .excludeDesktopElements],
@@ -259,8 +315,20 @@ final class ScreenReplyContextCaptureService {
         )
     }
 
-    private static func recognizeText(in image: CGImage) async throws -> [OCRLine] {
-        try await Task.detached(priority: .userInitiated) {
+    private static func recognizeText(in image: CGImage, cropRegion: CGRect? = nil) async throws -> OCRResult {
+        let startedAt = Date()
+        let crop = cropRegion.flatMap { normalizedCropRegion($0, imageWidth: image.width, imageHeight: image.height) }
+        let recognitionImage: CGImage
+        let offset: CGPoint
+        if let crop, let croppedImage = image.cropping(to: crop) {
+            recognitionImage = croppedImage
+            offset = crop.origin
+        } else {
+            recognitionImage = image
+            offset = .zero
+        }
+
+        let lines = try await Task.detached(priority: .userInitiated) {
             var recognizedLines: [OCRLine] = []
             let request = VNRecognizeTextRequest { request, error in
                 if error != nil {
@@ -273,19 +341,19 @@ final class ScreenReplyContextCaptureService {
                     guard !text.isEmpty else { return nil }
                     let box = observation.boundingBox
                     let rect = CGRect(
-                        x: box.minX * CGFloat(image.width),
-                        y: (1 - box.maxY) * CGFloat(image.height),
-                        width: box.width * CGFloat(image.width),
-                        height: box.height * CGFloat(image.height)
+                        x: offset.x + box.minX * CGFloat(recognitionImage.width),
+                        y: offset.y + (1 - box.maxY) * CGFloat(recognitionImage.height),
+                        width: box.width * CGFloat(recognitionImage.width),
+                        height: box.height * CGFloat(recognitionImage.height)
                     )
                     return OCRLine(id: index, text: text, rect: rect, confidence: candidate.confidence)
                 }
             }
-            request.recognitionLevel = .accurate
-            request.usesLanguageCorrection = true
+            request.recognitionLevel = crop == nil ? .accurate : .fast
+            request.usesLanguageCorrection = crop == nil
             request.recognitionLanguages = ["zh-Hans", "zh-Hant", "en-US"]
 
-            let handler = VNImageRequestHandler(cgImage: image, options: [:])
+            let handler = VNImageRequestHandler(cgImage: recognitionImage, options: [:])
             try handler.perform([request])
             return recognizedLines
                 .filter { $0.confidence >= 0.25 }
@@ -296,6 +364,11 @@ final class ScreenReplyContextCaptureService {
                     return lhs.rect.minX < rhs.rect.minX
                 }
         }.value
+        return OCRResult(
+            lines: lines,
+            cropRegion: crop,
+            durationMs: Date().timeIntervalSince(startedAt) * 1_000
+        )
     }
 
     private static func capturedLines(
@@ -600,19 +673,20 @@ final class ScreenReplyContextCaptureService {
         return rect
     }
 
-    private static func screenPointInWindow(
+    private static func mouseScreenPointInWindow(
         _ point: CGPoint,
         windowBounds: CGRect,
         imageWidth: CGFloat,
         imageHeight: CGFloat
     ) -> CGPoint? {
         guard windowBounds.width > 0, windowBounds.height > 0 else { return nil }
-        guard windowBounds.insetBy(dx: -2, dy: -2).contains(point) else { return nil }
+        let convertedPoint = quartzPoint(fromAppKitScreenPoint: point) ?? point
+        guard windowBounds.insetBy(dx: -2, dy: -2).contains(convertedPoint) else { return nil }
         let scaleX = imageWidth / windowBounds.width
         let scaleY = imageHeight / windowBounds.height
         let converted = CGPoint(
-            x: (point.x - windowBounds.minX) * scaleX,
-            y: (point.y - windowBounds.minY) * scaleY
+            x: (convertedPoint.x - windowBounds.minX) * scaleX,
+            y: (convertedPoint.y - windowBounds.minY) * scaleY
         )
         guard converted.x >= 0,
               converted.y >= 0,
@@ -621,6 +695,27 @@ final class ScreenReplyContextCaptureService {
             return nil
         }
         return converted
+    }
+
+    private static func mouseOCRCropRegion(
+        centeredAt point: CGPoint,
+        imageWidth: CGFloat,
+        imageHeight: CGFloat
+    ) -> CGRect {
+        let width = min(imageWidth, max(760, min(1_420, imageWidth * 0.52)))
+        let height = min(imageHeight, max(520, min(820, imageHeight * 0.42)))
+        let x = min(max(0, point.x - width / 2), max(0, imageWidth - width))
+        let y = min(max(0, point.y - height / 2), max(0, imageHeight - height))
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    private static func normalizedCropRegion(_ rect: CGRect, imageWidth: Int, imageHeight: Int) -> CGRect? {
+        let imageRect = CGRect(x: 0, y: 0, width: imageWidth, height: imageHeight)
+        let clamped = rect.intersection(imageRect)
+        guard !clamped.isNull, clamped.width > 8, clamped.height > 8 else { return nil }
+        let integral = clamped.integral.intersection(imageRect)
+        guard !integral.isNull, integral.width > 8, integral.height > 8 else { return nil }
+        return integral
     }
 
     private static func windowRectInScreen(
@@ -639,7 +734,38 @@ final class ScreenReplyContextCaptureService {
             height: rect.height * scaleY
         )
         guard converted.width > 0, converted.height > 0 else { return nil }
-        return converted
+        return appKitRect(fromQuartzScreenRect: converted)
+    }
+
+    private static func quartzPoint(fromAppKitScreenPoint point: CGPoint) -> CGPoint? {
+        guard let screen = NSScreen.screens.first(where: { $0.frame.insetBy(dx: -2, dy: -2).contains(point) })
+            ?? NSScreen.main else {
+            return nil
+        }
+        return CGPoint(
+            x: point.x,
+            y: screen.frame.minY + (screen.frame.maxY - point.y)
+        )
+    }
+
+    private static func appKitRect(fromQuartzScreenRect rect: CGRect) -> CGRect {
+        guard let screen = NSScreen.screens.first(where: { screen in
+            let quartzFrame = CGRect(
+                x: screen.frame.minX,
+                y: screen.frame.minY,
+                width: screen.frame.width,
+                height: screen.frame.height
+            )
+            return quartzFrame.intersects(rect) || quartzFrame.contains(CGPoint(x: rect.midX, y: rect.midY))
+        }) ?? NSScreen.main else {
+            return rect
+        }
+        return CGRect(
+            x: rect.minX,
+            y: screen.frame.minY + (screen.frame.maxY - rect.maxY),
+            width: rect.width,
+            height: rect.height
+        )
     }
 
     private static func mouseFocusedContext(
