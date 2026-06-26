@@ -13,6 +13,40 @@
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
+## 本轮追加（2026-06-27：快捷键延迟诊断日志）
+
+- 用户反馈：
+  - 企业微信图片临时窗口中不是完全收不到快捷键，而是可能延迟好几秒后才出现语音波形条。
+  - 本轮先调查和加日志，可以先不改捕获策略。
+- 判断：
+  - 现有 `ScreenReply.jsonl` 显示企业微信开始 OCR 后并不慢，截图约几十毫秒，OCR 约几百毫秒；用户感知的多秒延迟更可能发生在“快捷键事件送达 NexVoice”之前或刚进入 App 路由时。
+  - 当前右 Alt / Fn 快捷键使用 `NSEvent.addGlobalMonitorForEvents` + local monitor；自定义组合键才启用更底层的 `CGEventTap` 兜底。
+  - 本轮未把右 Alt 改成 `CGEventTap`，避免未验证前引入重复触发、双击/长按误判等回归。
+- 本轮修复：
+  - 新增 `Sources/NexVoiceHost/ShortcutDiagnosticsLogger.swift`，写入 `~/Library/Application Support/NexVoice/Logs/Shortcut.jsonl`。
+  - `GlobalVoiceShortcutMonitor` 记录快捷键监控启动策略、原始键盘事件来源、keyCode、事件类型、modifier flags、NSEvent 投递延迟、是否命中当前快捷键、按下/松开、单击延迟等待、双击触发、长按触发等。
+  - `main.swift` 记录 App 内部分流：单击/双击/长按收到后走 `begin`、`beginContextQuestion`、`beginScreenReply`、选中文字问答、鼠标问答、普通语音输入 ASR 启动、ASR 会话开始和失败。
+  - 这些日志只用于诊断，不改变单击、双击、长按现有行为。
+- 新版信息：
+  - 版本：`0.1.55 (56)`
+  - App：`dist/NexVoice.app`
+  - 安装路径：`/Applications/NexVoice.app`
+  - 当前运行 PID：`62877`
+  - 旧版备份：`dist/install-backups/NexVoice-20260627-025105-pre-0.1.55.app`
+  - 新 DMG：`dist/NexVoice-0.1.55-build56-shortcut-diagnostics-embedded-keys-20260627.dmg`
+  - SHA256：`cdfe5b7df2c24163f4e0378d992de5dc6d13c45f7f57a721bf9d2825ad340bbd`
+- 已验证：
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 通过。
+  - `swift test --disable-sandbox --quiet` 通过，151 个测试。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过。
+  - `plutil -lint dist/NexVoice.app/Contents/Info.plist` 通过。
+  - DMG 挂载校验通过，根目录包含 `NexVoice.app` 和 `Applications` 快捷入口。
+- 下一步复测：
+  - 在企业微信图片临时窗口按一次右 Alt 普通语音输入，观察是否仍然多秒后才出现波形条。
+  - 复测后优先看 `Shortcut.jsonl`：如果 `keyboard_event_received.deliveryDelayMs` 已经很大，说明卡在系统事件投递；如果投递正常但 `transcription_service_start_requested` 或 `voice_session_started` 很晚，说明卡在 NexVoice 内部流程。
+  - 若确认是系统事件投递延迟，再评估把右 Alt 也接入 `CGEventTap` 兜底。
+
 ## 本轮追加（2026-06-27：修复鼠标 OCR 框偏小、ASR 截断、双击后立刻结束）
 
 - 用户复测反馈：

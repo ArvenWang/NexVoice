@@ -195,8 +195,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleShortcutTriggered() {
-        guard !isRewritingCurrentSession, rewriteTask == nil else { return }
-        switch VoiceShortcutTriggerPolicy.action(for: shortcutSessionState, trigger: .single) {
+        logShortcutRoute(event: "single_trigger_received", triggerKind: "single")
+        guard !isRewritingCurrentSession, rewriteTask == nil else {
+            logShortcutRoute(event: "single_trigger_ignored_busy", triggerKind: "single")
+            return
+        }
+        let action = VoiceShortcutTriggerPolicy.action(for: shortcutSessionState, trigger: .single)
+        logShortcutRoute(event: "single_trigger_routed", triggerKind: "single", routeAction: String(describing: action))
+        switch action {
         case .begin:
             beginTranscription()
         case .beginContextQuestion:
@@ -209,8 +215,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleShortcutDoubleTriggered() {
-        guard !isRewritingCurrentSession, rewriteTask == nil, beginSessionTask == nil else { return }
-        switch VoiceShortcutTriggerPolicy.action(for: shortcutSessionState, trigger: .double) {
+        logShortcutRoute(event: "double_trigger_received", triggerKind: "double")
+        guard !isRewritingCurrentSession, rewriteTask == nil, beginSessionTask == nil else {
+            logShortcutRoute(event: "double_trigger_ignored_busy", triggerKind: "double")
+            return
+        }
+        let action = VoiceShortcutTriggerPolicy.action(for: shortcutSessionState, trigger: .double)
+        logShortcutRoute(event: "double_trigger_routed", triggerKind: "double", routeAction: String(describing: action))
+        switch action {
         case .beginContextQuestion:
             beginContextQuestion()
         case .begin, .finish, .ignore:
@@ -441,6 +453,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func beginTranscription() {
         guard beginSessionTask == nil else { return }
+        logShortcutRoute(event: "begin_transcription_requested", routeAction: "begin")
         beginSessionTask = Task { @MainActor [weak self] in
             guard let self else { return }
             await self.beginTranscriptionAfterSelectionCapture()
@@ -449,6 +462,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func beginContextQuestion() {
         guard beginSessionTask == nil else { return }
+        logShortcutRoute(event: "begin_context_question_requested", routeAction: "beginContextQuestion")
         beginSessionTask = Task { @MainActor [weak self] in
             guard let self else { return }
             await self.beginContextQuestionAfterSelectionCapture()
@@ -468,6 +482,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if let selectedTextContext = await textInserter.selectedTextQuestionContext(in: targetApplication) {
+            logShortcutRoute(
+                event: "begin_context_question_selected_text",
+                routeAction: "beginContextQuestion",
+                interactionMode: ContextCaptureInteractionMode.selectedTextQuestion.rawValue
+            )
             beginSelectedTextQuestion(
                 selectedTextContext: selectedTextContext,
                 anchorRect: shortcutAnchorRect,
@@ -478,6 +497,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         beginSessionTask = nil
+        logShortcutRoute(
+            event: "begin_context_question_mouse",
+            routeAction: "beginContextQuestion",
+            interactionMode: ContextCaptureInteractionMode.mouseContextQuestion.rawValue
+        )
         beginMouseContextQuestion(anchorRect: shortcutAnchorRect)
     }
 
@@ -541,6 +565,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         captionPanel.showOverlay(anchorRect: anchorRect)
         do {
+            logShortcutRoute(
+                event: "transcription_service_start_requested",
+                routeAction: "beginContextQuestion",
+                interactionMode: ContextCaptureInteractionMode.selectedTextQuestion.rawValue
+            )
             try transcriptionService.start(
                 personalDictionary: personalDictionary,
                 rewriteContext: rewriteContextForCurrentSession
@@ -559,17 +588,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleShortcutLongPressed() {
+        logShortcutRoute(event: "long_press_received", triggerKind: "long")
         guard transcriptionService.state == .idle,
               beginSessionTask == nil,
               rewriteTask == nil,
               !isRewritingCurrentSession else {
+            logShortcutRoute(event: "long_press_ignored_busy", triggerKind: "long")
             return
         }
+        logShortcutRoute(event: "long_press_routed", triggerKind: "long", routeAction: "beginScreenReply")
         beginScreenReply()
     }
 
     private func handleShortcutLongPressEnded() {
         guard isScreenReplyInstructionSession else { return }
+        logShortcutRoute(event: "long_press_end_received", triggerKind: "long_end")
         switch transcriptionService.state {
         case .running:
             stopTranscription()
@@ -676,6 +709,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         captionPanel.showPassiveMessage("识别中")
         do {
+            logShortcutRoute(
+                event: "transcription_service_start_requested",
+                routeAction: "beginScreenReply",
+                interactionMode: ContextCaptureInteractionMode.focusedInputScreenReply.rawValue
+            )
             try transcriptionService.start(
                 personalDictionary: personalDictionary,
                 rewriteContext: rewriteContext
@@ -692,6 +730,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func beginMouseContextQuestion(anchorRect: CGRect? = nil) {
+        logShortcutRoute(
+            event: "begin_mouse_context_question_requested",
+            routeAction: "beginContextQuestion",
+            interactionMode: ContextCaptureInteractionMode.mouseContextQuestion.rawValue
+        )
         targetApplicationForCurrentSession = NSWorkspace.shared.frontmostApplication
         let targetApplication = targetApplicationForCurrentSession
         let anchorRect = anchorRect ?? CGRect(origin: NSEvent.mouseLocation, size: .zero)
@@ -749,6 +792,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rewriteContextForCurrentSession = rewriteContext
 
         do {
+            logShortcutRoute(
+                event: "transcription_service_start_requested",
+                routeAction: "beginContextQuestion",
+                interactionMode: ContextCaptureInteractionMode.mouseContextQuestion.rawValue
+            )
             try transcriptionService.start(
                 personalDictionary: personalDictionary,
                 rewriteContext: rewriteContext
@@ -884,6 +932,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         captionPanel.reset()
         captionPanel.showOverlay()
         do {
+            logShortcutRoute(
+                event: "transcription_service_start_requested",
+                routeAction: "begin",
+                interactionMode: "voice_input"
+            )
             try transcriptionService.start(
                 personalDictionary: personalDictionary,
                 rewriteContext: rewriteContextForCurrentSession
@@ -905,7 +958,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleTranscriptionEvent(_ event: VoiceRealtimeEvent) {
         guard !isCurrentSessionCancelled else { return }
 
+        if case .sessionStarted = event {
+            logShortcutRoute(
+                event: "voice_session_started",
+                interactionMode: contextCaptureInteractionModeForCurrentSession?.rawValue ?? "voice_input"
+            )
+        }
+
         if case .failed(let message) = event {
+            logShortcutRoute(
+                event: "voice_session_failed",
+                interactionMode: contextCaptureInteractionModeForCurrentSession?.rawValue ?? "voice_input",
+                errorMessage: message
+            )
             handleTranscriptionFailure(message)
             return
         }
@@ -2045,6 +2110,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             for: context.applicationWorkflow.identifier,
             defaultStyle: selectedRewriteStyle
         )
+    }
+
+    private func logShortcutRoute(
+        event: String,
+        triggerKind: String? = nil,
+        routeAction: String? = nil,
+        interactionMode: String? = nil,
+        errorMessage: String? = nil
+    ) {
+        let application = targetApplicationForCurrentSession ?? NSWorkspace.shared.frontmostApplication
+        Task {
+            await ShortcutDiagnosticsLogger.shared.log(
+                ShortcutDiagnosticEvent(
+                    event: event,
+                    shortcut: voiceShortcut,
+                    triggerKind: triggerKind,
+                    routeAction: routeAction,
+                    transcriptionState: String(describing: shortcutSessionState),
+                    interactionMode: interactionMode ?? contextCaptureInteractionModeForCurrentSession?.rawValue,
+                    appName: application?.localizedName,
+                    bundleIdentifier: application?.bundleIdentifier,
+                    mouseLocation: NSEvent.mouseLocation,
+                    errorMessage: errorMessage
+                )
+            )
+        }
     }
 
     private static func loadOutputLanguage() -> VoiceOutputLanguage {

@@ -58,20 +58,28 @@ final class GlobalVoiceShortcutMonitor {
         let didStartKeyboardEventTap = usesLowLevelKeyboardTapFallback
             ? startKeyboardEventTap()
             : true
+        logShortcutEvent(
+            "monitor_started",
+            usesRegisteredHotKey: usesRegisteredHotKey,
+            allowsEventMonitorFallback: allowsEventMonitorFallback,
+            usesLowLevelKeyboardTapFallback: usesLowLevelKeyboardTapFallback,
+            didRegisterHotKey: didRegisterHotKey,
+            didStartKeyboardEventTap: didStartKeyboardEventTap
+        )
 
         globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
             Task { @MainActor [weak self] in
-                self?.handle(event)
+                self?.handle(event, source: "nsevent_global_key")
             }
         }
         globalFlagsMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged]) { [weak self] event in
             Task { @MainActor [weak self] in
-                self?.handle(event)
+                self?.handle(event, source: "nsevent_global_flags")
             }
         }
         localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [weak self] event in
             Task { @MainActor [weak self] in
-                self?.handle(event)
+                self?.handle(event, source: "nsevent_local")
             }
             return event
         }
@@ -132,8 +140,16 @@ final class GlobalVoiceShortcutMonitor {
         monitor = nil
     }
 
-    private func handle(_ event: NSEvent) {
-        guard !isSuspended else { return }
+    private func handle(_ event: NSEvent, source: String) {
+        if shouldLog(event) {
+            logKeyboardEvent(event, source: source, matched: shortcutMatches(event))
+        }
+        guard !isSuspended else {
+            if shouldLog(event) {
+                logKeyboardEvent(event, source: source, eventName: "keyboard_event_ignored_suspended", matched: false)
+            }
+            return
+        }
         switch event.type {
         case .keyDown:
             handleKeyDown(event)
@@ -147,6 +163,16 @@ final class GlobalVoiceShortcutMonitor {
     }
 
     private func handleKeyboardTap(type: CGEventType, keyCode: UInt16, flags: CGEventFlags) {
+        if shouldLog(type: type, keyCode: keyCode, flags: flags) {
+            logShortcutEvent(
+                "keyboard_event_received",
+                source: "cg_event_tap",
+                keyCode: keyCode,
+                eventType: Self.eventTypeName(type),
+                flagsRawValue: flags.rawValue,
+                matched: shortcutMatches(type: type, keyCode: keyCode, flags: flags)
+            )
+        }
         switch type {
         case .keyDown:
             handleKeyDown(keyCode: keyCode, flags: flags)
@@ -215,11 +241,13 @@ final class GlobalVoiceShortcutMonitor {
 
     private func handleRegisteredHotKeyPressed() {
         guard !isPressed else { return }
+        logShortcutEvent("registered_hotkey_pressed", source: "carbon_hotkey", matched: true)
         beginShortcutPress()
     }
 
     private func handleRegisteredHotKeyReleased() {
         guard isPressed else { return }
+        logShortcutEvent("registered_hotkey_released", source: "carbon_hotkey", matched: true)
         endShortcutPress()
     }
 
@@ -290,12 +318,18 @@ final class GlobalVoiceShortcutMonitor {
         } else {
             isSecondPressForDoubleTrigger = false
         }
+        logShortcutEvent(
+            "press_begin",
+            isSecondPressForDoubleTrigger: isSecondPressForDoubleTrigger,
+            didTriggerLongPress: didTriggerLongPress
+        )
         longPressWorkItem?.cancel()
         guard !isSecondPressForDoubleTrigger else { return }
         let workItem = DispatchWorkItem { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self, self.isPressed, !self.didTriggerLongPress else { return }
                 self.didTriggerLongPress = true
+                self.logShortcutEvent("long_press_triggered", triggerKind: "long")
                 self.onLongPress?()
             }
         }
@@ -312,29 +346,39 @@ final class GlobalVoiceShortcutMonitor {
         didTriggerLongPress = false
         let isDoubleTrigger = isSecondPressForDoubleTrigger
         isSecondPressForDoubleTrigger = false
+        logShortcutEvent(
+            "press_end",
+            isSecondPressForDoubleTrigger: isDoubleTrigger,
+            triggerKind: shouldTriggerShortPress ? (isDoubleTrigger ? "double" : "single") : (shouldEndLongPress ? "long_end" : "none")
+        )
         if shouldTriggerShortPress {
             handleShortPressEnded(isDoubleTrigger: isDoubleTrigger)
         } else if shouldEndLongPress {
+            logShortcutEvent("long_press_ended", triggerKind: "long_end")
             onLongPressEnded?()
         }
     }
 
     private func handleShortPressEnded(isDoubleTrigger: Bool) {
         if isDoubleTrigger {
+            logShortcutEvent("double_trigger_fired", triggerKind: "double")
             onDoubleTrigger?()
             return
         }
 
         guard shouldDelayShortPressForDoubleTrigger?() == true else {
+            logShortcutEvent("single_trigger_fired", shouldDelayShortPress: false, triggerKind: "single")
             onTrigger?()
             return
         }
 
         pendingShortPressWorkItem?.cancel()
+        logShortcutEvent("single_trigger_deferred", shouldDelayShortPress: true, triggerKind: "single")
         let workItem = DispatchWorkItem { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self, self.pendingShortPressWorkItem != nil else { return }
                 self.pendingShortPressWorkItem = nil
+                self.logShortcutEvent("single_trigger_deferred_fired", shouldDelayShortPress: true, triggerKind: "single")
                 self.onTrigger?()
             }
         }
@@ -386,5 +430,148 @@ final class GlobalVoiceShortcutMonitor {
     private static func isEscapeCancel(_ event: NSEvent) -> Bool {
         guard event.keyCode == escapeKeyCode else { return false }
         return event.modifierFlags.intersection([.command, .shift, .option, .control]).isEmpty
+    }
+
+    private func shouldLog(_ event: NSEvent) -> Bool {
+        if event.keyCode == Self.escapeKeyCode { return true }
+        switch shortcut {
+        case .rightOptionKey:
+            return event.keyCode == VoiceShortcut.rightOptionKeyCode || event.modifierFlags.contains(.option)
+        case .functionKey:
+            return event.type == .flagsChanged && event.modifierFlags.contains(.function)
+        case .keyCombo(let keyCode, _):
+            return event.keyCode == keyCode
+        }
+    }
+
+    private func shouldLog(type: CGEventType, keyCode: UInt16, flags: CGEventFlags) -> Bool {
+        switch shortcut {
+        case .rightOptionKey:
+            return keyCode == VoiceShortcut.rightOptionKeyCode || flags.contains(.maskAlternate)
+        case .functionKey:
+            return type == .flagsChanged && flags.contains(.maskSecondaryFn)
+        case .keyCombo(let expectedKeyCode, _):
+            return keyCode == expectedKeyCode
+        }
+    }
+
+    private func shortcutMatches(_ event: NSEvent) -> Bool {
+        switch event.type {
+        case .keyDown:
+            return shortcut.matchesKeyEvent(
+                keyCode: event.keyCode,
+                flags: Self.cgFlags(from: event.modifierFlags)
+            )
+        case .keyUp:
+            return shortcut.matchesKeyReleaseEvent(keyCode: event.keyCode)
+        case .flagsChanged:
+            let flags = Self.cgFlags(from: event.modifierFlags)
+            return shortcut.matchesModifierKeyPress(keyCode: event.keyCode, flags: flags)
+                || shortcut.matchesModifierKeyRelease(keyCode: event.keyCode, flags: flags)
+        default:
+            return false
+        }
+    }
+
+    private func shortcutMatches(type: CGEventType, keyCode: UInt16, flags: CGEventFlags) -> Bool {
+        switch type {
+        case .keyDown:
+            return shortcut.matchesKeyEvent(keyCode: keyCode, flags: flags)
+        case .keyUp:
+            return shortcut.matchesKeyReleaseEvent(keyCode: keyCode)
+        case .flagsChanged:
+            return shortcut.matchesModifierKeyPress(keyCode: keyCode, flags: flags)
+                || shortcut.matchesModifierKeyRelease(keyCode: keyCode, flags: flags)
+        default:
+            return false
+        }
+    }
+
+    private func logKeyboardEvent(
+        _ event: NSEvent,
+        source: String,
+        eventName: String = "keyboard_event_received",
+        matched: Bool
+    ) {
+        let delayMs = Int(max(0, (ProcessInfo.processInfo.systemUptime - event.timestamp) * 1_000).rounded())
+        logShortcutEvent(
+            eventName,
+            source: source,
+            keyCode: event.keyCode,
+            eventType: Self.eventTypeName(event.type),
+            flagsRawValue: Self.cgFlags(from: event.modifierFlags).rawValue,
+            eventTimestampSeconds: event.timestamp,
+            deliveryDelayMs: delayMs,
+            matched: matched
+        )
+    }
+
+    private func logShortcutEvent(
+        _ event: String,
+        source: String? = nil,
+        keyCode: UInt16? = nil,
+        eventType: String? = nil,
+        flagsRawValue: UInt64? = nil,
+        eventTimestampSeconds: Double? = nil,
+        deliveryDelayMs: Int? = nil,
+        matched: Bool? = nil,
+        isSecondPressForDoubleTrigger: Bool? = nil,
+        didTriggerLongPress: Bool? = nil,
+        shouldDelayShortPress: Bool? = nil,
+        triggerKind: String? = nil,
+        usesRegisteredHotKey: Bool? = nil,
+        allowsEventMonitorFallback: Bool? = nil,
+        usesLowLevelKeyboardTapFallback: Bool? = nil,
+        didRegisterHotKey: Bool? = nil,
+        didStartKeyboardEventTap: Bool? = nil
+    ) {
+        let application = NSWorkspace.shared.frontmostApplication
+        Task {
+            await ShortcutDiagnosticsLogger.shared.log(
+                ShortcutDiagnosticEvent(
+                    event: event,
+                    source: source,
+                    shortcut: shortcut,
+                    keyCode: keyCode,
+                    eventType: eventType,
+                    flagsRawValue: flagsRawValue,
+                    eventTimestampSeconds: eventTimestampSeconds,
+                    deliveryDelayMs: deliveryDelayMs,
+                    matched: matched,
+                    isPressed: isPressed,
+                    isSuspended: isSuspended,
+                    isSecondPressForDoubleTrigger: isSecondPressForDoubleTrigger,
+                    didTriggerLongPress: didTriggerLongPress,
+                    shouldDelayShortPress: shouldDelayShortPress,
+                    triggerKind: triggerKind,
+                    appName: application?.localizedName,
+                    bundleIdentifier: application?.bundleIdentifier,
+                    mouseLocation: NSEvent.mouseLocation,
+                    usesRegisteredHotKey: usesRegisteredHotKey,
+                    allowsEventMonitorFallback: allowsEventMonitorFallback,
+                    usesLowLevelKeyboardTapFallback: usesLowLevelKeyboardTapFallback,
+                    didRegisterHotKey: didRegisterHotKey,
+                    didStartKeyboardEventTap: didStartKeyboardEventTap
+                )
+            )
+        }
+    }
+
+    private static func eventTypeName(_ type: NSEvent.EventType) -> String {
+        switch type {
+        case .keyDown: return "key_down"
+        case .keyUp: return "key_up"
+        case .flagsChanged: return "flags_changed"
+        default: return String(describing: type)
+        }
+    }
+
+    private static func eventTypeName(_ type: CGEventType) -> String {
+        switch type {
+        case .keyDown: return "key_down"
+        case .keyUp: return "key_up"
+        case .flagsChanged: return "flags_changed"
+        default: return String(describing: type)
+        }
     }
 }
