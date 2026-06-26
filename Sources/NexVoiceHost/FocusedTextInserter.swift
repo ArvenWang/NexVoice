@@ -116,6 +116,10 @@ final class FocusedTextInserter {
         return Self.nonEditableSelectedTextContext(in: targetApplication)
     }
 
+    func selectedTextQuestionContext(in targetApplication: NSRunningApplication?) async -> SelectedTextContext? {
+        Self.selectedTextQuestionContext(in: targetApplication)
+    }
+
     func rewriteContext(
         in targetApplication: NSRunningApplication?,
         selectedTextMode: Bool,
@@ -181,10 +185,6 @@ final class FocusedTextInserter {
         Self.hasEditableSelectedText(in: targetApplication)
     }
 
-    func hasStrictFocusedEditableInput(in targetApplication: NSRunningApplication?) -> Bool {
-        Self.hasFocusedEditableElement(in: targetApplication)
-    }
-
     func focusedInputFrame(in targetApplication: NSRunningApplication?) -> CGRect? {
         let focusedElement = Self.focusedElement(in: targetApplication) ?? Self.systemFocusedElement()
         let elementChain = focusedElement.map { Self.elementAndParents(from: $0, maxDepth: 4) } ?? []
@@ -244,6 +244,33 @@ final class FocusedTextInserter {
             }
         }
         return nil
+    }
+
+    private static func selectedTextQuestionContext(
+        in targetApplication: NSRunningApplication?
+    ) -> SelectedTextContext? {
+        if let focusedElement = focusedElement(in: targetApplication) ?? systemFocusedElement() {
+            for element in elementAndParents(from: focusedElement, maxDepth: 4) {
+                if let context = selectedTextContext(from: element) {
+                    return context
+                }
+            }
+        }
+
+        return nonEditableSelectedTextContext(in: targetApplication)
+    }
+
+    private static func selectedTextContext(from element: AXUIElement) -> SelectedTextContext? {
+        guard let selectedText = selectedText(on: element)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !selectedText.isEmpty else {
+            return nil
+        }
+
+        return SelectedTextContext(
+            text: selectedText,
+            anchorRect: frameAttribute(on: element) ?? CGRect(origin: NSEvent.mouseLocation, size: .zero)
+        )
     }
 
     private static func nonEditableSelectedTextContext(

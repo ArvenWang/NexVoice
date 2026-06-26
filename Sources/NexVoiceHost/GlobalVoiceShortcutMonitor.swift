@@ -19,7 +19,11 @@ final class GlobalVoiceShortcutMonitor {
     private var isCancelPressed = false
     private var didTriggerLongPress = false
     private var longPressWorkItem: DispatchWorkItem?
+    private var pendingShortPressWorkItem: DispatchWorkItem?
+    private var isSecondPressForDoubleTrigger = false
     private var onTrigger: (() -> Void)?
+    private var onDoubleTrigger: (() -> Void)?
+    private var shouldDelayShortPressForDoubleTrigger: (() -> Bool)?
     private var onLongPress: (() -> Void)?
     private var onLongPressEnded: (() -> Void)?
     private var onCancel: (() -> Void)?
@@ -29,6 +33,8 @@ final class GlobalVoiceShortcutMonitor {
     func start(
         shortcut: VoiceShortcut,
         onTrigger: @escaping () -> Void,
+        onDoubleTrigger: @escaping () -> Void,
+        shouldDelayShortPressForDoubleTrigger: @escaping () -> Bool,
         onLongPress: @escaping () -> Void,
         onLongPressEnded: @escaping () -> Void,
         onCancel: @escaping () -> Void
@@ -36,6 +42,8 @@ final class GlobalVoiceShortcutMonitor {
         stop()
         self.shortcut = shortcut
         self.onTrigger = onTrigger
+        self.onDoubleTrigger = onDoubleTrigger
+        self.shouldDelayShortPressForDoubleTrigger = shouldDelayShortPressForDoubleTrigger
         self.onLongPress = onLongPress
         self.onLongPressEnded = onLongPressEnded
         self.onCancel = onCancel
@@ -73,7 +81,10 @@ final class GlobalVoiceShortcutMonitor {
 
     func updateShortcut(_ shortcut: VoiceShortcut) {
         self.shortcut = shortcut
+        pendingShortPressWorkItem?.cancel()
+        pendingShortPressWorkItem = nil
         isPressed = false
+        isSecondPressForDoubleTrigger = false
     }
 
     func setSuspended(_ suspended: Bool) {
@@ -81,8 +92,11 @@ final class GlobalVoiceShortcutMonitor {
         if suspended {
             longPressWorkItem?.cancel()
             longPressWorkItem = nil
+            pendingShortPressWorkItem?.cancel()
+            pendingShortPressWorkItem = nil
             isPressed = false
             didTriggerLongPress = false
+            isSecondPressForDoubleTrigger = false
             isCancelPressed = false
         }
     }
@@ -94,13 +108,18 @@ final class GlobalVoiceShortcutMonitor {
         removeMonitor(&globalFlagsMonitor)
         removeMonitor(&localEventMonitor)
         onTrigger = nil
+        onDoubleTrigger = nil
+        shouldDelayShortPressForDoubleTrigger = nil
         onLongPress = nil
         onLongPressEnded = nil
         onCancel = nil
         longPressWorkItem?.cancel()
         longPressWorkItem = nil
+        pendingShortPressWorkItem?.cancel()
+        pendingShortPressWorkItem = nil
         isPressed = false
         didTriggerLongPress = false
+        isSecondPressForDoubleTrigger = false
         isCancelPressed = false
         usesRegisteredHotKey = false
         allowsEventMonitorFallback = false
@@ -264,6 +283,13 @@ final class GlobalVoiceShortcutMonitor {
     private func beginShortcutPress() {
         isPressed = true
         didTriggerLongPress = false
+        if pendingShortPressWorkItem != nil {
+            pendingShortPressWorkItem?.cancel()
+            pendingShortPressWorkItem = nil
+            isSecondPressForDoubleTrigger = true
+        } else {
+            isSecondPressForDoubleTrigger = false
+        }
         longPressWorkItem?.cancel()
         let workItem = DispatchWorkItem { [weak self] in
             Task { @MainActor [weak self] in
@@ -283,11 +309,36 @@ final class GlobalVoiceShortcutMonitor {
         let shouldEndLongPress = isPressed && didTriggerLongPress
         isPressed = false
         didTriggerLongPress = false
+        let isDoubleTrigger = isSecondPressForDoubleTrigger
+        isSecondPressForDoubleTrigger = false
         if shouldTriggerShortPress {
-            onTrigger?()
+            handleShortPressEnded(isDoubleTrigger: isDoubleTrigger)
         } else if shouldEndLongPress {
             onLongPressEnded?()
         }
+    }
+
+    private func handleShortPressEnded(isDoubleTrigger: Bool) {
+        if isDoubleTrigger {
+            onDoubleTrigger?()
+            return
+        }
+
+        guard shouldDelayShortPressForDoubleTrigger?() == true else {
+            onTrigger?()
+            return
+        }
+
+        pendingShortPressWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, self.pendingShortPressWorkItem != nil else { return }
+                self.pendingShortPressWorkItem = nil
+                self.onTrigger?()
+            }
+        }
+        pendingShortPressWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.doubleTriggerInterval, execute: workItem)
     }
 
     private static func cgFlags(from modifiers: NSEvent.ModifierFlags) -> CGEventFlags {
@@ -329,6 +380,7 @@ final class GlobalVoiceShortcutMonitor {
 
     private static let escapeKeyCode: UInt16 = 53
     private static let longPressThreshold: TimeInterval = 0.55
+    private static let doubleTriggerInterval: TimeInterval = 0.28
 
     private static func isEscapeCancel(_ event: NSEvent) -> Bool {
         guard event.keyCode == escapeKeyCode else { return false }

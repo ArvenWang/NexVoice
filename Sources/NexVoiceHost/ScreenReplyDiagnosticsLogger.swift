@@ -64,6 +64,9 @@ struct ScreenReplyDiagnosticEvent: Encodable {
     let visibleText: String?
     let structuredMessages: String?
     let lines: [ScreenReplyCapturedLine]?
+    let contextSource: String?
+    let selectedTextCharacters: Int?
+    let selectedText: String?
     let voiceInstructionCharacters: Int?
     let voiceInstruction: String?
     let replyCharacters: Int?
@@ -88,6 +91,8 @@ struct ScreenReplyDiagnosticEvent: Encodable {
         visibleText: String? = nil,
         structuredMessages: String? = nil,
         lines: [ScreenReplyCapturedLine]? = nil,
+        contextSource: String? = nil,
+        selectedText: String? = nil,
         voiceInstruction: String? = nil,
         reply: String? = nil,
         errorMessage: String? = nil
@@ -112,6 +117,9 @@ struct ScreenReplyDiagnosticEvent: Encodable {
         self.visibleText = visibleText.map { Self.logText($0) }
         self.structuredMessages = structuredMessages.map { Self.logText($0) }
         self.lines = lines
+        self.contextSource = contextSource
+        self.selectedTextCharacters = selectedText?.count
+        self.selectedText = selectedText.map { Self.logText($0, limit: 4_000) }
         self.voiceInstructionCharacters = voiceInstruction?.count
         self.voiceInstruction = voiceInstruction.map { Self.logText($0, limit: 4_000) }
         self.replyCharacters = reply?.count

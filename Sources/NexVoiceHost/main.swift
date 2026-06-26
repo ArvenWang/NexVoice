@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private enum ContextCaptureInteractionMode: String {
         case focusedInputScreenReply = "focused_input_screen_reply"
         case mouseContextQuestion = "mouse_context_question"
+        case selectedTextQuestion = "selected_text_question"
     }
 
     private var statusItem: NSStatusItem?
@@ -68,6 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hasEditableSelectionForCurrentSession = false
     private var screenReplyCapturedContextForCurrentSession: ScreenReplyCapturedContext?
     private var pendingScreenReplyVoiceInstruction: String?
+    private var contextQuestionCaptureIDForCurrentSession: String?
     private var didInsertCurrentSession = false
     private var isCurrentSessionCancelled = false
     private var insertedTextPreview: String?
@@ -185,9 +187,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleShortcutTriggered() {
         guard !isRewritingCurrentSession, rewriteTask == nil else { return }
-        switch VoiceShortcutTriggerPolicy.action(for: shortcutSessionState) {
+        switch VoiceShortcutTriggerPolicy.action(for: shortcutSessionState, trigger: .single) {
         case .begin:
             beginTranscription()
+        case .beginContextQuestion:
+            beginContextQuestion()
         case .finish:
             stopTranscription()
         case .ignore:
@@ -195,11 +199,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func handleShortcutDoubleTriggered() {
+        guard !isRewritingCurrentSession, rewriteTask == nil, beginSessionTask == nil else { return }
+        switch VoiceShortcutTriggerPolicy.action(for: shortcutSessionState, trigger: .double) {
+        case .beginContextQuestion:
+            beginContextQuestion()
+        case .begin, .finish, .ignore:
+            break
+        }
+    }
+
+    private var shouldWaitForDoubleShortcut: Bool {
+        shortcutSessionState == .idle
+            && beginSessionTask == nil
+            && rewriteTask == nil
+            && !isRewritingCurrentSession
+    }
+
     private func startShortcutMonitor() {
         let didStart = shortcutMonitor.start(
             shortcut: voiceShortcut,
             onTrigger: { [weak self] in
                 self?.handleShortcutTriggered()
+            },
+            onDoubleTrigger: { [weak self] in
+                self?.handleShortcutDoubleTriggered()
+            },
+            shouldDelayShortPressForDoubleTrigger: { [weak self] in
+                self?.shouldWaitForDoubleShortcut ?? false
             },
             onLongPress: { [weak self] in
                 self?.handleShortcutLongPressed()
@@ -411,6 +438,109 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func beginContextQuestion() {
+        guard beginSessionTask == nil else { return }
+        beginSessionTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.beginContextQuestionAfterSelectionCapture()
+        }
+    }
+
+    private func beginContextQuestionAfterSelectionCapture() async {
+        targetApplicationForCurrentSession = NSWorkspace.shared.frontmostApplication
+        let targetApplication = targetApplicationForCurrentSession
+
+        guard permissionService.authorizationStatus() == .authorized else {
+            captionPanel.showPreparing()
+            requestMicrophonePermission()
+            beginSessionTask = nil
+            return
+        }
+
+        if let selectedTextContext = await textInserter.selectedTextQuestionContext(in: targetApplication) {
+            beginSelectedTextQuestion(
+                selectedTextContext: selectedTextContext,
+                targetApplication: targetApplication
+            )
+            beginSessionTask = nil
+            return
+        }
+
+        beginSessionTask = nil
+        beginMouseContextQuestion()
+    }
+
+    private func beginSelectedTextQuestion(
+        selectedTextContext: SelectedTextContext,
+        targetApplication: NSRunningApplication?
+    ) {
+        targetApplicationForCurrentSession = targetApplication
+        selectedTextContextForCurrentSession = selectedTextContext
+        rewriteContextForCurrentSession = nil
+        focusedDraftForCurrentSession = nil
+        focusedDraftReadMethodForCurrentSession = nil
+        focusedDraftIsTrustedForCurrentSession = false
+        hasEditableSelectionForCurrentSession = false
+        screenReplyCapturedContextForCurrentSession = nil
+        pendingScreenReplyVoiceInstruction = nil
+        didInsertCurrentSession = false
+        isCurrentSessionCancelled = false
+        insertedTextPreview = nil
+        latestRecoverableASRText = nil
+        pendingFailedTranscriptionRetry = nil
+        isRewritingCurrentSession = false
+        isScreenReplyInstructionSession = false
+        contextCaptureInteractionModeForCurrentSession = .selectedTextQuestion
+        let captureID = UUID().uuidString
+        contextQuestionCaptureIDForCurrentSession = captureID
+        didDetectScreenReplyVoiceInstruction = false
+        dictionaryLearningMonitor.cancel()
+        activeDictionaryLearningTasks = 0
+        dictionaryLearningResetWorkItem?.cancel()
+        dictionaryLearningResetWorkItem = nil
+        rewriteTask?.cancel()
+        rewriteTask = nil
+
+        let personalDictionary = VoicePersonalDictionaryStore.load()
+        rewriteContextForCurrentSession = textInserter.rewriteContext(
+            in: targetApplication,
+            selectedTextMode: true,
+            personalDictionary: personalDictionary
+        )
+
+        Task {
+            await ScreenReplyDiagnosticsLogger.shared.log(
+                ScreenReplyDiagnosticEvent(
+                    captureID: captureID,
+                    event: "context_question_captured",
+                    interactionMode: ContextCaptureInteractionMode.selectedTextQuestion.rawValue,
+                    appName: targetApplication?.localizedName,
+                    bundleIdentifier: targetApplication?.bundleIdentifier,
+                    contextSource: "selected_text",
+                    selectedText: selectedTextContext.text
+                )
+            )
+        }
+
+        captionPanel.showOverlay()
+        do {
+            try transcriptionService.start(
+                personalDictionary: personalDictionary,
+                rewriteContext: rewriteContextForCurrentSession
+            ) { [weak self] event in
+                Task { @MainActor [weak self] in
+                    self?.handleTranscriptionEvent(event)
+                }
+            }
+            statusItem?.button?.title = "NexVoice 划词问答中"
+            refreshMenuState()
+        } catch {
+            captionPanel.showStatus("启动失败", isError: true, autoHideDelay: 1.4)
+            statusItem?.button?.title = "NexVoice 出错"
+            refreshMenuState()
+        }
+    }
+
     private func handleShortcutLongPressed() {
         guard transcriptionService.state == .idle,
               beginSessionTask == nil,
@@ -451,6 +581,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         isRewritingCurrentSession = true
         isScreenReplyInstructionSession = true
         contextCaptureInteractionModeForCurrentSession = .focusedInputScreenReply
+        contextQuestionCaptureIDForCurrentSession = nil
         didDetectScreenReplyVoiceInstruction = false
         dictionaryLearningMonitor.cancel()
         rewriteTask?.cancel()
@@ -524,7 +655,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch contextCaptureInteractionModeForCurrentSession {
         case .mouseContextQuestion:
             captionPanel.showPassiveMessage("读取鼠标附近文字", anchorRect: CGRect(origin: NSEvent.mouseLocation, size: .zero))
-        case .focusedInputScreenReply, nil:
+        case .focusedInputScreenReply, .selectedTextQuestion, nil:
             captionPanel.showPassiveMessage("识别中")
         }
         do {
@@ -563,6 +694,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         isRewritingCurrentSession = true
         isScreenReplyInstructionSession = true
         contextCaptureInteractionModeForCurrentSession = .mouseContextQuestion
+        contextQuestionCaptureIDForCurrentSession = nil
         didDetectScreenReplyVoiceInstruction = false
         dictionaryLearningMonitor.cancel()
         rewriteTask?.cancel()
@@ -635,6 +767,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         selectedTextContextForCurrentSession = nil
         rewriteContextForCurrentSession = nil
         focusedDraftForCurrentSession = nil
+        focusedDraftReadMethodForCurrentSession = nil
         hasEditableSelectionForCurrentSession = false
         focusedDraftIsTrustedForCurrentSession = false
         screenReplyCapturedContextForCurrentSession = nil
@@ -647,6 +780,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         isRewritingCurrentSession = false
         isScreenReplyInstructionSession = false
         contextCaptureInteractionModeForCurrentSession = nil
+        contextQuestionCaptureIDForCurrentSession = nil
         didDetectScreenReplyVoiceInstruction = false
         dictionaryLearningMonitor.cancel()
         activeDictionaryLearningTasks = 0
@@ -659,15 +793,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             captionPanel.showPreparing()
             requestMicrophonePermission()
             beginSessionTask = nil
-            return
-        }
-
-        let hasStrictFocusedEditableInput = textInserter.hasStrictFocusedEditableInput(
-            in: targetApplicationForCurrentSession
-        )
-        guard hasStrictFocusedEditableInput else {
-            beginSessionTask = nil
-            beginMouseContextQuestion()
             return
         }
 
@@ -855,6 +980,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rewriteTask = Task { [weak self] in
             guard let self else { return }
             if let selectedTextContext, !selectedTextContext.text.isEmpty {
+                let captureID = self.contextQuestionCaptureIDForCurrentSession ?? UUID().uuidString
+                await ScreenReplyDiagnosticsLogger.shared.log(
+                    ScreenReplyDiagnosticEvent(
+                        captureID: captureID,
+                        event: "context_question_generating",
+                        interactionMode: self.contextCaptureInteractionModeForCurrentSession?.rawValue,
+                        appName: targetApplication?.localizedName,
+                        bundleIdentifier: targetApplication?.bundleIdentifier,
+                        contextSource: "selected_text",
+                        selectedText: selectedTextContext.text,
+                        voiceInstruction: originalText
+                    )
+                )
                 let result: String
                 do {
                     result = try await self.finalRewriteService.handleSelectedTextCommand(
@@ -867,9 +1005,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 } catch is CancellationError {
                     return
                 } catch {
+                    await ScreenReplyDiagnosticsLogger.shared.log(
+                        ScreenReplyDiagnosticEvent(
+                            captureID: captureID,
+                            event: "context_question_failed",
+                            interactionMode: self.contextCaptureInteractionModeForCurrentSession?.rawValue,
+                            appName: targetApplication?.localizedName,
+                            bundleIdentifier: targetApplication?.bundleIdentifier,
+                            contextSource: "selected_text",
+                            selectedText: selectedTextContext.text,
+                            voiceInstruction: originalText,
+                            errorMessage: error.localizedDescription
+                        )
+                    )
                     await MainActor.run {
                         guard !self.isCurrentSessionCancelled else { return }
                         self.selectedTextContextForCurrentSession = nil
+                        self.contextQuestionCaptureIDForCurrentSession = nil
                         self.isRewritingCurrentSession = false
                         self.rewriteTask = nil
                         self.captionPanel.showStatus("处理失败", isError: true, autoHideDelay: 1.4)
@@ -879,6 +1031,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     return
                 }
                 guard !Task.isCancelled else { return }
+                await ScreenReplyDiagnosticsLogger.shared.log(
+                    ScreenReplyDiagnosticEvent(
+                        captureID: captureID,
+                        event: "context_question_succeeded",
+                        interactionMode: self.contextCaptureInteractionModeForCurrentSession?.rawValue,
+                        appName: targetApplication?.localizedName,
+                        bundleIdentifier: targetApplication?.bundleIdentifier,
+                        contextSource: "selected_text",
+                        selectedText: selectedTextContext.text,
+                        voiceInstruction: originalText,
+                        reply: result
+                    )
+                )
 
                 await MainActor.run {
                     guard !self.isCurrentSessionCancelled else { return }
@@ -971,6 +1136,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         latestRecoverableASRText = nil
         pendingFailedTranscriptionRetry = nil
         insertedTextPreview = nil
+        contextCaptureInteractionModeForCurrentSession = nil
+        contextQuestionCaptureIDForCurrentSession = nil
         isRewritingCurrentSession = false
         rewriteTask = nil
         captionPanel.showContextualResult(text, anchorRect: anchorRect)
@@ -994,6 +1161,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let draftReadMethod = focusedDraftReadMethodForCurrentSession
         focusedDraftReadMethodForCurrentSession = nil
         focusedDraftIsTrustedForCurrentSession = false
+        contextCaptureInteractionModeForCurrentSession = nil
+        contextQuestionCaptureIDForCurrentSession = nil
         let hadEditableSelection = hasEditableSelectionForCurrentSession
         hasEditableSelectionForCurrentSession = false
         latestRecoverableASRText = nil
@@ -1361,6 +1530,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         focusedDraftReadMethodForCurrentSession = nil
         focusedDraftIsTrustedForCurrentSession = false
         hasEditableSelectionForCurrentSession = false
+        contextQuestionCaptureIDForCurrentSession = nil
         do {
             try textInserter.insert(reply, into: targetApplication)
             captionPanel.showInsertedText(reply)
@@ -1405,6 +1575,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         didDetectScreenReplyVoiceInstruction = false
         screenReplyCapturedContextForCurrentSession = nil
         pendingScreenReplyVoiceInstruction = nil
+        contextQuestionCaptureIDForCurrentSession = nil
     }
 
     private func stopTranscription() {
@@ -1452,6 +1623,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         isRewritingCurrentSession = false
         isScreenReplyInstructionSession = false
         contextCaptureInteractionModeForCurrentSession = nil
+        contextQuestionCaptureIDForCurrentSession = nil
         didDetectScreenReplyVoiceInstruction = false
         dictionaryLearningMonitor.cancel()
         activeDictionaryLearningTasks = 0
@@ -1482,6 +1654,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             focusedDraftReadMethodForCurrentSession = nil
             focusedDraftIsTrustedForCurrentSession = false
             hasEditableSelectionForCurrentSession = false
+            selectedTextContextForCurrentSession = nil
+            contextCaptureInteractionModeForCurrentSession = nil
+            contextQuestionCaptureIDForCurrentSession = nil
             captionPanel.showStatus("未识别到语音", isError: false, autoHideDelay: 0.9)
             statusItem?.button?.title = "NexVoice"
             refreshMenuState()

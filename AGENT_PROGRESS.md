@@ -6,14 +6,56 @@
 
 - 当前工作目录：`/Users/nefish/Desktop/Coding/NexVoice`。
 - 项目形态：SwiftPM macOS 菜单栏 App，核心模块为 `NexVoiceCore`，宿主为 `NexVoiceHost`。
-- 默认入口：短按右 Alt 开始语音输入，再按一次结束；长按右 Alt 约 0.55 秒进入看屏自动回复；ESC 可取消录音、等待 final、AI 改写或看屏回复中的会话。
+- 默认入口：单击右 Alt 开始普通语音输入，再单击一次结束；双击右 Alt 进入上下文问答（优先选中文字，未选中文字则读取鼠标附近 OCR）；长按右 Alt 约 0.55 秒进入看屏自动回复；ESC 可取消录音、等待 final、AI 改写或看屏回复中的会话。
 - 当前主链路：腾讯云实时 ASR `16k_zh_en` -> DeepSeek `deepseek-v4-flash` 最终整理 -> 写入当前聚焦输入框。
 - 普通语音输入已增加第一版“基于输入框短草稿连续改写”：录音开始时读取当前输入框草稿，语音结束后把“已有草稿 + 本轮语音”交给 DeepSeek 输出完整新草稿，并在安全条件满足时用非全选的 AX 写入替换当前输入框全文；空输入框、输入框内已有选区、超长草稿仍按光标位置普通插入。
 - 本地 SenseVoice Small 和 WhisperKit large-v3 保留为兜底和质量对照，不是当前默认主链路。
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
+## 本轮追加（2026-06-26：撤销焦点路由，改为双击上下文问答）
+
+- 用户确认新交互：
+  - 避免任何需要判断“当前是否在输入框焦点”的路由行为。
+  - 单击快捷键只负责普通语音输入；如果输入框里已有可编辑选区，仍由系统粘贴行为自然覆盖选中文本，保留“划词改写/覆盖”这条路。
+  - 双击快捷键进入上下文问答：优先读取当前选中文字作为上下文；如果没有选中文字，再读取鼠标附近 OCR 文字作为上下文。
+  - 长按快捷键继续保留看屏回复，不和单击/双击互抢。
+- 本轮实现：
+  - `GlobalVoiceShortcutMonitor` 新增双击识别；只在空闲态给单击等待约 0.28 秒的双击窗口，录音中单击停止不会被延迟。
+  - `VoiceShortcutTriggerPolicy` 显式区分单击/双击：单击为普通输入开始/结束，双击仅在空闲态进入上下文问答。
+  - `beginTranscriptionAfterSelectionCapture()` 已移除 `hasStrictFocusedEditableInput` 路由，不再因为焦点误判切到鼠标问答。
+  - `FocusedTextInserter.selectedTextQuestionContext(...)` 新增“问答用选中文字读取”；它只判断是否存在选中文字，不再把焦点框作为模式路由依据。
+  - 双击上下文问答路由顺序固定为：选中文字问答 -> 鼠标 OCR 问答。
+  - `ScreenReply.jsonl` 增加选中文字问答日志字段：`contextSource`、`selectedTextCharacters`、`selectedText`，并记录 `context_question_captured/generating/succeeded/failed`。
+- 当前行为：
+  - 单击右 Alt：普通语音输入；再单击结束并写入当前输入位置。
+  - 输入框内选中文字后单击右 Alt：语音结果会按原有写入链路覆盖选区。
+  - 双击右 Alt：如果有选中文字，基于选中文字问答，结果显示在浮层，不覆盖文本；如果没有选中文字，则基于鼠标附近 OCR 问答。
+  - 长按右 Alt：保留原看屏回复链路。
+- 已验证：
+  - `git diff --check` 通过。
+  - `swift test --disable-sandbox --filter VoiceShortcut --quiet` 通过，20 个相关测试。
+  - `swift test --disable-sandbox --quiet` 通过，150 个测试。
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 通过。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过。
+  - `/Applications/NexVoice.app` 签名验证通过。
+  - `/Applications/NexVoice.app` 版本号检查通过：`0.1.46 (47)`。
+  - `/Applications/NexVoice.app/Contents/Resources/NexVoiceEmbeddedConfig/DeepSeek.json` 和 `TencentCloudASR.json` 存在，未在日志或进展中展示密钥内容。
+  - `hdiutil verify dist/NexVoice-0.1.46-build47-double-shortcut-context-qa-embedded-keys-20260626.dmg` 通过。
+- 已构建并安装新版：
+  - App：`dist/NexVoice.app`
+  - 安装路径：`/Applications/NexVoice.app`
+  - 当前运行 PID：`75127`
+  - 旧版备份：`dist/install-backups/NexVoice-20260626-235956.app`
+  - 新 DMG：`dist/NexVoice-0.1.46-build47-double-shortcut-context-qa-embedded-keys-20260626.dmg`
+- Git：
+  - 本地提交：`9215102 Route context Q&A through double shortcut`
+  - 当前本地 `main` 比 `origin/main` 多 3 个提交；前两次远端推送受当前机器 GitHub 凭据限制失败，仍需用户补 GitHub 凭据后推送。
+
 ## 本轮追加（2026-06-26：短按按焦点路由输入框/鼠标 OCR 问答）
+
+> 重要：本节记录的是上一轮已验证不稳定的方案；当前实现已由“撤销焦点路由，改为双击上下文问答”替代。后续不要继续沿用“按焦点判断输入框/鼠标问答”的产品方向。
 
 - 用户确认新路由：
   - 短按快捷键时，如果当前焦点在输入框，走普通语音输入。

@@ -160,3 +160,15 @@ import Testing
     #expect(VoiceShortcutTriggerPolicy.action(for: .running) == .finish)
     #expect(VoiceShortcutTriggerPolicy.action(for: .finishing) == .ignore)
 }
+
+@Test func doubleShortcutStartsContextQuestionOnlyWhenIdle() {
+    #expect(
+        VoiceShortcutTriggerPolicy.action(for: .idle, trigger: .double) == .beginContextQuestion
+    )
+    #expect(
+        VoiceShortcutTriggerPolicy.action(for: .running, trigger: .double) == .ignore
+    )
+    #expect(
+        VoiceShortcutTriggerPolicy.action(for: .finishing, trigger: .double) == .ignore
+    )
+}
