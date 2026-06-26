@@ -181,6 +181,10 @@ final class FocusedTextInserter {
         Self.hasEditableSelectedText(in: targetApplication)
     }
 
+    func hasStrictFocusedEditableInput(in targetApplication: NSRunningApplication?) -> Bool {
+        Self.hasFocusedEditableElement(in: targetApplication)
+    }
+
     func focusedInputFrame(in targetApplication: NSRunningApplication?) -> CGRect? {
         let focusedElement = Self.focusedElement(in: targetApplication) ?? Self.systemFocusedElement()
         let elementChain = focusedElement.map { Self.elementAndParents(from: $0, maxDepth: 4) } ?? []

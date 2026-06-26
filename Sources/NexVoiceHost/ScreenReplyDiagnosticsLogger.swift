@@ -47,6 +47,7 @@ struct ScreenReplyDiagnosticEvent: Encodable {
     let timestamp: String
     let captureID: String
     let event: String
+    let interactionMode: String?
     let captureMode: ScreenReplyCaptureMode?
     let appName: String?
     let bundleIdentifier: String?
@@ -72,6 +73,7 @@ struct ScreenReplyDiagnosticEvent: Encodable {
     init(
         captureID: String,
         event: String,
+        interactionMode: String? = nil,
         captureMode: ScreenReplyCaptureMode? = nil,
         appName: String? = nil,
         bundleIdentifier: String? = nil,
@@ -93,6 +95,7 @@ struct ScreenReplyDiagnosticEvent: Encodable {
         self.timestamp = ISO8601DateFormatter().string(from: Date())
         self.captureID = captureID
         self.event = event
+        self.interactionMode = interactionMode
         self.captureMode = captureMode
         self.appName = appName
         self.bundleIdentifier = bundleIdentifier

@@ -17,6 +17,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let recordedAt: Date
     }
 
+    private enum ContextCaptureInteractionMode: String {
+        case focusedInputScreenReply = "focused_input_screen_reply"
+        case mouseContextQuestion = "mouse_context_question"
+    }
+
     private var statusItem: NSStatusItem?
     private var shortcutMenuItem: NSMenuItem?
     private var shortcutSettingsMenuItem: NSMenuItem?
@@ -70,6 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pendingFailedTranscriptionRetry: FailedTranscriptionRetry?
     private var isRewritingCurrentSession = false
     private var isScreenReplyInstructionSession = false
+    private var contextCaptureInteractionModeForCurrentSession: ContextCaptureInteractionMode?
     private var didDetectScreenReplyVoiceInstruction = false
     private var beginSessionTask: Task<Void, Never>?
     private var rewriteTask: Task<Void, Never>?
@@ -444,6 +450,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pendingFailedTranscriptionRetry = nil
         isRewritingCurrentSession = true
         isScreenReplyInstructionSession = true
+        contextCaptureInteractionModeForCurrentSession = .focusedInputScreenReply
         didDetectScreenReplyVoiceInstruction = false
         dictionaryLearningMonitor.cancel()
         rewriteTask?.cancel()
@@ -473,7 +480,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 capturedContext = try await self.screenReplyCaptureService.capture(
                     from: targetApplication,
                     focusedInputFrame: focusedInputFrame,
-                    mouseScreenLocation: NSEvent.mouseLocation
+                    mouseScreenLocation: nil,
+                    interactionMode: self.contextCaptureInteractionModeForCurrentSession?.rawValue
                 )
             } catch is CancellationError {
                 return
@@ -491,12 +499,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                       self.isScreenReplyInstructionSession else { return }
                 self.screenReplyCapturedContextForCurrentSession = capturedContext
                 self.rewriteTask = nil
-                if capturedContext.captureMode == .mouseRegion {
-                    self.captionPanel.showPassiveMessage(
-                        "已读取鼠标附近文字",
-                        anchorRect: capturedContext.mouseAnchorRectInScreen
-                    )
-                }
                 if let instruction = self.pendingScreenReplyVoiceInstruction {
                     self.pendingScreenReplyVoiceInstruction = nil
                     self.generateScreenReply(voiceInstruction: instruction)
@@ -519,7 +521,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             finishScreenReplyInstructionSession()
             return
         }
-        captionPanel.showPassiveMessage("识别中")
+        switch contextCaptureInteractionModeForCurrentSession {
+        case .mouseContextQuestion:
+            captionPanel.showPassiveMessage("读取鼠标附近文字", anchorRect: CGRect(origin: NSEvent.mouseLocation, size: .zero))
+        case .focusedInputScreenReply, nil:
+            captionPanel.showPassiveMessage("识别中")
+        }
         do {
             try transcriptionService.start(
                 personalDictionary: personalDictionary,
@@ -529,10 +536,97 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.handleTranscriptionEvent(event)
                 }
             }
-            statusItem?.button?.title = "NexVoice 识别中"
+            statusItem?.button?.title = contextCaptureInteractionModeForCurrentSession == .mouseContextQuestion
+                ? "NexVoice 读取鼠标附近文字"
+                : "NexVoice 识别中"
             refreshMenuState()
         } catch {
             generateScreenReply(voiceInstruction: "")
+        }
+    }
+
+    private func beginMouseContextQuestion() {
+        targetApplicationForCurrentSession = NSWorkspace.shared.frontmostApplication
+        selectedTextContextForCurrentSession = nil
+        rewriteContextForCurrentSession = nil
+        focusedDraftForCurrentSession = nil
+        focusedDraftReadMethodForCurrentSession = nil
+        focusedDraftIsTrustedForCurrentSession = false
+        hasEditableSelectionForCurrentSession = false
+        screenReplyCapturedContextForCurrentSession = nil
+        pendingScreenReplyVoiceInstruction = nil
+        didInsertCurrentSession = false
+        isCurrentSessionCancelled = false
+        insertedTextPreview = nil
+        latestRecoverableASRText = nil
+        pendingFailedTranscriptionRetry = nil
+        isRewritingCurrentSession = true
+        isScreenReplyInstructionSession = true
+        contextCaptureInteractionModeForCurrentSession = .mouseContextQuestion
+        didDetectScreenReplyVoiceInstruction = false
+        dictionaryLearningMonitor.cancel()
+        rewriteTask?.cancel()
+        captionPanel.showPassiveMessage("读取鼠标附近文字", anchorRect: CGRect(origin: NSEvent.mouseLocation, size: .zero))
+        statusItem?.button?.title = "NexVoice 读取鼠标附近文字"
+        refreshMenuState()
+
+        let targetApplication = targetApplicationForCurrentSession
+        let personalDictionary = VoicePersonalDictionaryStore.load()
+        let rewriteContext = textInserter.rewriteContext(
+            in: targetApplication,
+            selectedTextMode: false,
+            personalDictionary: personalDictionary
+        )
+        rewriteContextForCurrentSession = rewriteContext
+
+        startScreenReplyInstructionCapture(
+            personalDictionary: personalDictionary,
+            rewriteContext: rewriteContext
+        )
+
+        rewriteTask = Task { [weak self] in
+            guard let self else { return }
+            let capturedContext: ScreenReplyCapturedContext
+            do {
+                capturedContext = try await self.screenReplyCaptureService.capture(
+                    from: targetApplication,
+                    focusedInputFrame: nil,
+                    mouseScreenLocation: NSEvent.mouseLocation,
+                    interactionMode: self.contextCaptureInteractionModeForCurrentSession?.rawValue
+                )
+                guard capturedContext.captureMode == .mouseRegion else {
+                    throw ScreenReplyCaptureError.noMouseRegionText
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                await MainActor.run {
+                    guard !self.isCurrentSessionCancelled else { return }
+                    self.finishScreenReplyWithError(error)
+                }
+                return
+            }
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                guard !self.isCurrentSessionCancelled,
+                      self.isScreenReplyInstructionSession,
+                      self.contextCaptureInteractionModeForCurrentSession == .mouseContextQuestion else { return }
+                self.screenReplyCapturedContextForCurrentSession = capturedContext
+                self.rewriteTask = nil
+                self.captionPanel.showPassiveMessage(
+                    "已读取鼠标附近文字",
+                    anchorRect: capturedContext.mouseAnchorRectInScreen
+                )
+                if let instruction = self.pendingScreenReplyVoiceInstruction {
+                    self.pendingScreenReplyVoiceInstruction = nil
+                    self.generateScreenReply(voiceInstruction: instruction)
+                } else {
+                    self.isRewritingCurrentSession = false
+                    self.statusItem?.button?.title = "NexVoice 识别中"
+                    self.refreshMenuState()
+                }
+            }
         }
     }
 
@@ -552,6 +646,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pendingFailedTranscriptionRetry = nil
         isRewritingCurrentSession = false
         isScreenReplyInstructionSession = false
+        contextCaptureInteractionModeForCurrentSession = nil
         didDetectScreenReplyVoiceInstruction = false
         dictionaryLearningMonitor.cancel()
         activeDictionaryLearningTasks = 0
@@ -566,9 +661,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             beginSessionTask = nil
             return
         }
-        selectedTextContextForCurrentSession = await textInserter.selectedTextContext(
+
+        let hasStrictFocusedEditableInput = textInserter.hasStrictFocusedEditableInput(
             in: targetApplicationForCurrentSession
         )
+        guard hasStrictFocusedEditableInput else {
+            beginSessionTask = nil
+            beginMouseContextQuestion()
+            return
+        }
+
         hasEditableSelectionForCurrentSession = textInserter.hasEditableSelection(
             in: targetApplicationForCurrentSession
         )
@@ -1008,13 +1110,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let capturedContext = screenReplyCapturedContextForCurrentSession else {
             pendingScreenReplyVoiceInstruction = trimmedInstruction
             isRewritingCurrentSession = true
-            captionPanel.showLoading("AI 输入中")
-            statusItem?.button?.title = "NexVoice AI 输入中"
+            let message = contextCaptureInteractionModeForCurrentSession == .mouseContextQuestion
+                ? "AI 回答中"
+                : "AI 输入中"
+            captionPanel.showLoading(message)
+            statusItem?.button?.title = "NexVoice \(message)"
             refreshMenuState()
             return
         }
-        if capturedContext.captureMode == .mouseRegion,
-           VoiceMouseContextCommandPolicy.shouldAnswerFromMouseContext(instruction: trimmedInstruction) {
+        if contextCaptureInteractionModeForCurrentSession == .mouseContextQuestion {
             generateMouseContextAnswer(
                 capturedContext: capturedContext,
                 voiceInstruction: trimmedInstruction
@@ -1044,6 +1148,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ScreenReplyDiagnosticEvent(
                     captureID: capturedContext.captureID,
                     event: "generating",
+                    interactionMode: contextCaptureInteractionModeForCurrentSession?.rawValue,
                     captureMode: capturedContext.captureMode,
                     appName: capturedContext.appName,
                     bundleIdentifier: capturedContext.bundleIdentifier,
@@ -1076,6 +1181,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     ScreenReplyDiagnosticEvent(
                         captureID: capturedContext.captureID,
                         event: "failed",
+                        interactionMode: self.contextCaptureInteractionModeForCurrentSession?.rawValue,
                         captureMode: capturedContext.captureMode,
                         appName: capturedContext.appName,
                         bundleIdentifier: capturedContext.bundleIdentifier,
@@ -1103,6 +1209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ScreenReplyDiagnosticEvent(
                     captureID: capturedContext.captureID,
                     event: "succeeded",
+                    interactionMode: self.contextCaptureInteractionModeForCurrentSession?.rawValue,
                     captureMode: capturedContext.captureMode,
                     appName: capturedContext.appName,
                     bundleIdentifier: capturedContext.bundleIdentifier,
@@ -1153,6 +1260,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ScreenReplyDiagnosticEvent(
                     captureID: capturedContext.captureID,
                     event: "mouse_context_generating",
+                    interactionMode: self.contextCaptureInteractionModeForCurrentSession?.rawValue,
                     captureMode: capturedContext.captureMode,
                     appName: capturedContext.appName,
                     bundleIdentifier: capturedContext.bundleIdentifier,
@@ -1185,6 +1293,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     ScreenReplyDiagnosticEvent(
                         captureID: capturedContext.captureID,
                         event: "mouse_context_failed",
+                        interactionMode: self.contextCaptureInteractionModeForCurrentSession?.rawValue,
                         captureMode: capturedContext.captureMode,
                         appName: capturedContext.appName,
                         bundleIdentifier: capturedContext.bundleIdentifier,
@@ -1213,6 +1322,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ScreenReplyDiagnosticEvent(
                     captureID: capturedContext.captureID,
                     event: "mouse_context_succeeded",
+                    interactionMode: self.contextCaptureInteractionModeForCurrentSession?.rawValue,
                     captureMode: capturedContext.captureMode,
                     appName: capturedContext.appName,
                     bundleIdentifier: capturedContext.bundleIdentifier,
@@ -1263,6 +1373,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func finishScreenReplyWithError(_ error: Error) {
         isRewritingCurrentSession = false
+        let interactionMode = contextCaptureInteractionModeForCurrentSession
         finishScreenReplyInstructionSession()
         rewriteTask = nil
         rewriteContextForCurrentSession = nil
@@ -1276,8 +1387,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             message = "需要屏幕录制权限"
         } else if case ScreenReplyCaptureError.noRecognizedText = error {
             message = "未识别到文字"
+        } else if case ScreenReplyCaptureError.noMouseRegionText = error {
+            message = "未识别到鼠标附近文字"
         } else {
-            message = "看屏回复失败"
+            message = interactionMode == .mouseContextQuestion
+                ? "鼠标问答失败"
+                : "看屏回复失败"
         }
         captionPanel.showStatus(message, isError: true, autoHideDelay: 1.6)
         statusItem?.button?.title = "NexVoice 出错"
@@ -1286,6 +1401,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func finishScreenReplyInstructionSession() {
         isScreenReplyInstructionSession = false
+        contextCaptureInteractionModeForCurrentSession = nil
         didDetectScreenReplyVoiceInstruction = false
         screenReplyCapturedContextForCurrentSession = nil
         pendingScreenReplyVoiceInstruction = nil
@@ -1293,14 +1409,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func stopTranscription() {
         if isScreenReplyInstructionSession {
-            captionPanel.showLoading("AI 输入中")
+            let message = contextCaptureInteractionModeForCurrentSession == .mouseContextQuestion
+                ? "AI 回答中"
+                : "AI 输入中"
+            captionPanel.showLoading(message)
         } else {
             captionPanel.showLoading("正在处理")
         }
         transcriptionService.finish()
-        statusItem?.button?.title = isScreenReplyInstructionSession
-            ? "NexVoice AI 输入中"
-            : "NexVoice 等待腾讯云结果"
+        if isScreenReplyInstructionSession {
+            statusItem?.button?.title = contextCaptureInteractionModeForCurrentSession == .mouseContextQuestion
+                ? "NexVoice AI 回答中"
+                : "NexVoice AI 输入中"
+        } else {
+            statusItem?.button?.title = "NexVoice 等待腾讯云结果"
+        }
         refreshMenuState()
     }
 
@@ -1328,6 +1451,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         targetApplicationForCurrentSession = nil
         isRewritingCurrentSession = false
         isScreenReplyInstructionSession = false
+        contextCaptureInteractionModeForCurrentSession = nil
         didDetectScreenReplyVoiceInstruction = false
         dictionaryLearningMonitor.cancel()
         activeDictionaryLearningTasks = 0

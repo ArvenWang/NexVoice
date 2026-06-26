@@ -407,25 +407,6 @@ public enum VoiceRewritePromptPolicy {
     }
 }
 
-public enum VoiceMouseContextCommandPolicy {
-    public static func shouldAnswerFromMouseContext(instruction: String) -> Bool {
-        let trimmed = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return true }
-        let normalized = trimmed
-            .lowercased()
-            .replacingOccurrences(of: " ", with: "")
-
-        let questionMarkers = [
-            "?", "？", "什么", "什么意思", "怎么", "为什么", "是否", "是不是",
-            "能不能", "可以吗", "合理吗", "对吗", "哪里", "哪个", "哪种",
-            "总结", "概括", "解释", "说明", "翻译", "看一下", "帮我看",
-            "评价", "分析", "判断", "what", "why", "how", "which", "summarize",
-            "explain", "translate", "analyze"
-        ]
-        return questionMarkers.contains { normalized.contains($0) }
-    }
-}
-
 public enum VoiceUtteranceIntent: String, Equatable, Sendable {
     case question
     case request

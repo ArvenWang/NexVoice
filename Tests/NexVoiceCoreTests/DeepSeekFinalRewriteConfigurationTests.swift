@@ -350,13 +350,6 @@ import Testing
     #expect(!prompt.contains("替用户生成一条可以直接填入当前输入框的新回复"))
 }
 
-@Test func mouseContextCommandPolicyOnlyRoutesQuestionLikeInstructions() {
-    #expect(VoiceMouseContextCommandPolicy.shouldAnswerFromMouseContext(instruction: "这个是什么意思？"))
-    #expect(VoiceMouseContextCommandPolicy.shouldAnswerFromMouseContext(instruction: "帮我总结一下这块"))
-    #expect(VoiceMouseContextCommandPolicy.shouldAnswerFromMouseContext(instruction: "explain this"))
-    #expect(!VoiceMouseContextCommandPolicy.shouldAnswerFromMouseContext(instruction: "用更强硬一点的语气回复第二句"))
-}
-
 @Test func rewriteOutputSanitizerRemovesMarkdownDecorationForPlainTextInputs() {
     let output = VoiceRewriteOutputSanitizer.sanitize("""
     # 结论

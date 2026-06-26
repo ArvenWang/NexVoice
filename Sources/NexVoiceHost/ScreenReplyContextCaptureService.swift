@@ -42,6 +42,7 @@ enum ScreenReplyCaptureError: LocalizedError {
     case noVisibleWindow
     case captureFailed
     case noRecognizedText
+    case noMouseRegionText
 
     var errorDescription: String? {
         switch self {
@@ -55,6 +56,8 @@ enum ScreenReplyCaptureError: LocalizedError {
             return "当前窗口截图失败。"
         case .noRecognizedText:
             return "没有识别到当前窗口里的文字。"
+        case .noMouseRegionText:
+            return "没有识别到鼠标附近的文字。"
         }
     }
 }
@@ -64,7 +67,8 @@ final class ScreenReplyContextCaptureService {
     func capture(
         from application: NSRunningApplication?,
         focusedInputFrame: CGRect? = nil,
-        mouseScreenLocation: CGPoint? = nil
+        mouseScreenLocation: CGPoint? = nil,
+        interactionMode: String? = nil
     ) async throws -> ScreenReplyCapturedContext {
         guard SystemPermissionRequester.hasScreenRecordingPermission else {
             throw ScreenReplyCaptureError.screenRecordingPermissionRequired
@@ -145,6 +149,7 @@ final class ScreenReplyContextCaptureService {
             ScreenReplyDiagnosticEvent(
                 captureID: captureID,
                 event: "captured",
+                interactionMode: interactionMode,
                 captureMode: captureMode,
                 appName: application.localizedName,
                 bundleIdentifier: application.bundleIdentifier,

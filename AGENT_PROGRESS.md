@@ -13,6 +13,45 @@
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
+## 本轮追加（2026-06-26：短按按焦点路由输入框/鼠标 OCR 问答）
+
+- 用户确认新路由：
+  - 短按快捷键时，如果当前焦点在输入框，走普通语音输入。
+  - 短按快捷键时，如果当前焦点不在输入框，走鼠标 OCR 问答。
+  - 划词问答默认下线，不再作为短按的默认分支。
+  - 长按快捷键仍保留为输入框场景的看屏回复；长按看屏回复不再传入鼠标位置，避免被鼠标 OCR 抢路由。
+- 本轮实现：
+  - `FocusedTextInserter.hasStrictFocusedEditableInput(in:)` 新增严格输入框焦点判断：只看当前 AX 焦点链是否为可编辑输入框，不使用底部输入框兜底、不扫描窗口、不看鼠标位置。
+  - `beginTranscriptionAfterSelectionCapture()` 在短按开始时先做严格焦点判断；非输入框直接进入 `beginMouseContextQuestion()`。
+  - 鼠标 OCR 问答不再按“介绍/总结/翻译”等关键词判断；只要短按时焦点不在输入框，就固定走 `mouse_context_command`。
+  - 原 `VoiceMouseContextCommandPolicy` 关键词路由和对应测试已删除，避免未来误导。
+  - `ScreenReply.jsonl` 新增 `interactionMode`，区分 `focused_input_screen_reply` 与 `mouse_context_question`。
+- 当前行为：
+  - 输入框内短按：普通语音输入，最终写入输入框。
+  - 非输入框短按：读取鼠标附近 OCR 文字，语音问题结束后显示鼠标附近浮层答案，不自动写入输入框。
+  - 输入框内长按：看屏回复，最终写入输入框。
+- 版本递增：`0.1.44 (45)` -> `0.1.45 (46)`。
+- 已构建并安装新版：
+  - App：`dist/NexVoice.app`
+  - 安装路径：`/Applications/NexVoice.app`
+  - 旧版备份：`dist/install-backups/NexVoice-20260626-233114.app`
+  - 当前运行 PID：`33721`
+  - 新 DMG：`dist/NexVoice-0.1.45-build46-focus-routed-mouse-ocr-embedded-keys-20260626.dmg`
+- 验证：
+  - `git diff --check` 通过。
+  - `swift test --disable-sandbox --filter DeepSeekFinalRewriteConfiguration --quiet` 通过，26 个测试。
+  - `swift test --disable-sandbox --quiet` 通过，149 个测试。
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 通过。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过。
+  - `/Applications/NexVoice.app` 签名、版本号和嵌入配置检查通过。
+  - `hdiutil verify dist/NexVoice-0.1.45-build46-focus-routed-mouse-ocr-embedded-keys-20260626.dmg` 通过。
+- 需要用户复测：
+  - 点击输入框后短按右 Alt：应进入普通语音输入，不应触发鼠标 OCR 问答。
+  - 不点击输入框、鼠标指向网页/图片/PDF/聊天窗口文字后短按右 Alt：应进入鼠标 OCR 问答，结果显示为鼠标附近浮层。
+  - 点击输入框后长按右 Alt：应进入原看屏回复并写入输入框。
+  - 日志中应能看到 `interactionMode=mouse_context_question` 或 `interactionMode=focused_input_screen_reply`。
+
 ## 本轮追加（2026-06-26：鼠标位置 OCR 问答第一阶段/第二阶段）
 
 - 用户明确范围：
