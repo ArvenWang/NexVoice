@@ -13,6 +13,41 @@
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
+## 本轮追加（2026-06-27：修复双击问答误落回普通输入）
+
+- 用户复测反馈：
+  - 单击和长按正常。
+  - 双击问答经常落回普通语音输入，结果进入 Codex / 搜索框，用户无法分清是在回答问题还是写入文本。
+  - 双击问答期间提示条也不稳定，应该始终贴近鼠标或划词位置。
+- 日志结论：
+  - 最新 `ContinuousRewrite.jsonl` 出现多条 `final_rewrite` / `inserted`，例如 Codex 中双击测试内容进入了普通输入链路。
+  - 同期 `ScreenReply.jsonl` 没有新的 `selected_text_question` 或 `mouse_context_question`，说明主要问题是双击没有被稳定识别，而不是 AI 回答生成后显示错位置。
+- 本轮修复：
+  - `GlobalVoiceShortcutMonitor.doubleTriggerInterval` 从 `0.28s` 调整为 `0.50s`，避免第二下稍慢就先触发单击普通输入。
+  - `VoiceCaptionPanelController.showOverlay(...)` 支持传入锚点；划词问答开始录音时直接锚定在选中文字附近。
+  - 录音过程中的 `识别到指令`、`AI 回答中` 状态继续使用鼠标/划词锚点，不再跳回底部。
+  - 鼠标 OCR 问答在等待语音 final 或停止录音后的加载状态，也会继续锚定鼠标附近。
+- 已验证：
+  - `git diff --check` 通过。
+  - `swift test --disable-sandbox --filter VoiceShortcut --quiet` 通过，20 个相关测试。
+  - `swift test --disable-sandbox --quiet` 通过，150 个测试。
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 通过。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过。
+  - `/Applications/NexVoice.app` 签名验证通过。
+  - `/Applications/NexVoice.app` 版本号检查通过：`0.1.47 (48)`。
+  - `/Applications/NexVoice.app/Contents/Resources/NexVoiceEmbeddedConfig/DeepSeek.json` 和 `TencentCloudASR.json` 存在，未在日志或进展中展示密钥内容。
+  - `hdiutil verify dist/NexVoice-0.1.47-build48-double-shortcut-fix-embedded-keys-20260627.dmg` 通过。
+- 已构建并安装新版：
+  - App：`dist/NexVoice.app`
+  - 安装路径：`/Applications/NexVoice.app`
+  - 当前运行 PID：`7047`
+  - 旧版备份：`dist/install-backups/NexVoice-20260627-001715.app`
+  - 新 DMG：`dist/NexVoice-0.1.47-build48-double-shortcut-fix-embedded-keys-20260627.dmg`
+- Git：
+  - 本地提交：`d8100ef Fix double shortcut context QA routing`
+  - 当前本地 `main` 比 `origin/main` 多 4 个提交；远端推送仍需要用户补 GitHub 凭据。
+
 ## 本轮追加（2026-06-26：撤销焦点路由，改为双击上下文问答）
 
 - 用户确认新交互：

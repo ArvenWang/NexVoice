@@ -58,9 +58,9 @@ final class VoiceCaptionPanelController {
         buildContent()
     }
 
-    func showOverlay() {
+    func showOverlay(anchorRect: CGRect? = nil) {
         cancelScheduledHide()
-        configurePassivePanel()
+        configurePassivePanel(anchorRect: anchorRect)
         let shouldAnimateEntrance = !panel.isVisible
         showRecordingContent()
         waveformView.setActive(true)
@@ -655,7 +655,7 @@ final class VoiceCaptionPanelController {
 
     private func showActiveWaveform() {
         cancelScheduledHide()
-        configurePassivePanel()
+        configurePassivePanel(anchorRect: contextualAnchorRect)
         let shouldAnimateEntrance = !panel.isVisible
         showRecordingContent()
         waveformView.setActive(true)

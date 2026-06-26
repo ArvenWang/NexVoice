@@ -380,7 +380,7 @@ final class GlobalVoiceShortcutMonitor {
 
     private static let escapeKeyCode: UInt16 = 53
     private static let longPressThreshold: TimeInterval = 0.55
-    private static let doubleTriggerInterval: TimeInterval = 0.28
+    private static let doubleTriggerInterval: TimeInterval = 0.50
 
     private static func isEscapeCancel(_ event: NSEvent) -> Bool {
         guard event.keyCode == escapeKeyCode else { return false }

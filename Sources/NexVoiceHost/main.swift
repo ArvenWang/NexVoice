@@ -522,7 +522,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
         }
 
-        captionPanel.showOverlay()
+        captionPanel.showOverlay(anchorRect: selectedTextContext.anchorRect)
         do {
             try transcriptionService.start(
                 personalDictionary: personalDictionary,
@@ -915,7 +915,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .partialTranscript:
             guard !didDetectScreenReplyVoiceInstruction else { return }
             didDetectScreenReplyVoiceInstruction = true
-            captionPanel.showPassiveMessage("识别到指令")
+            captionPanel.showPassiveMessage("识别到指令", anchorRect: screenReplyInstructionAnchorRect)
             statusItem?.button?.title = "NexVoice 识别到指令"
         case .sessionStarted, .audioLevelUpdated, .latencyUpdated:
             statusItem?.button?.title = didDetectScreenReplyVoiceInstruction
@@ -1282,7 +1282,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let message = contextCaptureInteractionModeForCurrentSession == .mouseContextQuestion
                 ? "AI 回答中"
                 : "AI 输入中"
-            captionPanel.showLoading(message)
+            captionPanel.showLoading(message, anchorRect: screenReplyInstructionAnchorRect)
             statusItem?.button?.title = "NexVoice \(message)"
             refreshMenuState()
             return
@@ -1583,7 +1583,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let message = contextCaptureInteractionModeForCurrentSession == .mouseContextQuestion
                 ? "AI 回答中"
                 : "AI 输入中"
-            captionPanel.showLoading(message)
+            captionPanel.showLoading(message, anchorRect: screenReplyInstructionAnchorRect)
         } else {
             captionPanel.showLoading("正在处理")
         }
@@ -1730,6 +1730,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .finishing:
             return .finishing
         }
+    }
+
+    private var screenReplyInstructionAnchorRect: CGRect? {
+        if let selectedTextContext = selectedTextContextForCurrentSession {
+            return selectedTextContext.anchorRect
+        }
+        if let capturedContext = screenReplyCapturedContextForCurrentSession,
+           contextCaptureInteractionModeForCurrentSession == .mouseContextQuestion {
+            return capturedContext.mouseAnchorRectInScreen
+        }
+        if contextCaptureInteractionModeForCurrentSession == .mouseContextQuestion {
+            return CGRect(origin: NSEvent.mouseLocation, size: .zero)
+        }
+        return nil
     }
 
     @objc private func quit() {
