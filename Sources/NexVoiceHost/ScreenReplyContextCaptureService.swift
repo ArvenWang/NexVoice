@@ -4,6 +4,7 @@ import Foundation
 import Vision
 
 struct ScreenReplyCapturedContext: Sendable {
+    let captureMode: ScreenReplyCaptureMode
     let captureID: String
     let appName: String?
     let bundleIdentifier: String?
@@ -14,6 +15,14 @@ struct ScreenReplyCapturedContext: Sendable {
     let lineCount: Int
     let inputFrameInWindow: CGRect?
     let replyRegionInWindow: CGRect?
+    let mouseLocationInWindow: CGPoint?
+    let mouseRegionInWindow: CGRect?
+    let mouseAnchorRectInScreen: CGRect?
+}
+
+enum ScreenReplyCaptureMode: String, Encodable, Sendable {
+    case replyRegion
+    case mouseRegion
 }
 
 struct ScreenReplyCapturedLine: Encodable, Sendable {
@@ -54,7 +63,8 @@ enum ScreenReplyCaptureError: LocalizedError {
 final class ScreenReplyContextCaptureService {
     func capture(
         from application: NSRunningApplication?,
-        focusedInputFrame: CGRect? = nil
+        focusedInputFrame: CGRect? = nil,
+        mouseScreenLocation: CGPoint? = nil
     ) async throws -> ScreenReplyCapturedContext {
         guard SystemPermissionRequester.hasScreenRecordingPermission else {
             throw ScreenReplyCaptureError.screenRecordingPermissionRequired
@@ -102,12 +112,31 @@ final class ScreenReplyContextCaptureService {
                 bundleIdentifier: application.bundleIdentifier
             )
         }
+        let mouseLocationInWindow = mouseScreenLocation.flatMap {
+            Self.screenPointInWindow(
+                $0,
+                windowBounds: window.bounds,
+                imageWidth: CGFloat(image.width),
+                imageHeight: CGFloat(image.height)
+            )
+        }
+        let mouseContext = mouseLocationInWindow.flatMap {
+            Self.mouseFocusedContext(
+                from: lines,
+                mouseLocation: $0,
+                imageWidth: CGFloat(image.width),
+                imageHeight: CGFloat(image.height),
+                bundleIdentifier: application.bundleIdentifier
+            )
+        }
+        let captureMode: ScreenReplyCaptureMode = mouseContext == nil ? .replyRegion : .mouseRegion
         let capturedLines = Self.capturedLines(
             from: lines,
             imageWidth: CGFloat(image.width),
             imageHeight: CGFloat(image.height),
             bundleIdentifier: application.bundleIdentifier,
-            replyRegion: replyRegion
+            replyRegion: replyRegion,
+            mouseIncludedLineIDs: mouseContext?.includedLineIDs
         )
         let replyLines = capturedLines.filter(\.includedInReplyContext)
         let visibleText = replyLines.map(\.text).joined(separator: "\n")
@@ -116,6 +145,7 @@ final class ScreenReplyContextCaptureService {
             ScreenReplyDiagnosticEvent(
                 captureID: captureID,
                 event: "captured",
+                captureMode: captureMode,
                 appName: application.localizedName,
                 bundleIdentifier: application.bundleIdentifier,
                 windowTitle: window.title,
@@ -123,6 +153,8 @@ final class ScreenReplyContextCaptureService {
                 imageHeight: image.height,
                 inputFrame: inputFrameInWindow,
                 replyRegion: replyRegion,
+                mouseLocation: mouseLocationInWindow,
+                mouseRegion: mouseContext?.region,
                 lineCount: lines.count,
                 visibleText: visibleText,
                 structuredMessages: structuredMessages,
@@ -130,6 +162,7 @@ final class ScreenReplyContextCaptureService {
             )
         )
         return ScreenReplyCapturedContext(
+            captureMode: captureMode,
             captureID: captureID,
             appName: application.localizedName,
             bundleIdentifier: application.bundleIdentifier,
@@ -139,7 +172,17 @@ final class ScreenReplyContextCaptureService {
             lines: capturedLines,
             lineCount: lines.count,
             inputFrameInWindow: inputFrameInWindow,
-            replyRegionInWindow: replyRegion
+            replyRegionInWindow: replyRegion,
+            mouseLocationInWindow: mouseLocationInWindow,
+            mouseRegionInWindow: mouseContext?.region,
+            mouseAnchorRectInScreen: mouseContext.flatMap {
+                Self.windowRectInScreen(
+                    $0.region,
+                    windowBounds: window.bounds,
+                    imageWidth: CGFloat(image.width),
+                    imageHeight: CGFloat(image.height)
+                )
+            } ?? mouseScreenLocation.map { CGRect(origin: $0, size: .zero) }
         )
     }
 
@@ -157,9 +200,15 @@ final class ScreenReplyContextCaptureService {
     }
 
     private struct OCRLine: Sendable {
+        let id: Int
         let text: String
         let rect: CGRect
         let confidence: Float
+    }
+
+    private struct MouseFocusedContext: Sendable {
+        let region: CGRect
+        let includedLineIDs: Set<Int>
     }
 
     private static func bestVisibleWindow(for processIdentifier: pid_t) -> WindowInfo? {
@@ -209,7 +258,7 @@ final class ScreenReplyContextCaptureService {
                     return
                 }
                 let observations = request.results as? [VNRecognizedTextObservation] ?? []
-                recognizedLines = observations.compactMap { observation in
+                recognizedLines = observations.enumerated().compactMap { index, observation in
                     guard let candidate = observation.topCandidates(1).first else { return nil }
                     let text = candidate.string.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !text.isEmpty else { return nil }
@@ -220,7 +269,7 @@ final class ScreenReplyContextCaptureService {
                         width: box.width * CGFloat(image.width),
                         height: box.height * CGFloat(image.height)
                     )
-                    return OCRLine(text: text, rect: rect, confidence: candidate.confidence)
+                    return OCRLine(id: index, text: text, rect: rect, confidence: candidate.confidence)
                 }
             }
             request.recognitionLevel = .accurate
@@ -245,7 +294,8 @@ final class ScreenReplyContextCaptureService {
         imageWidth: CGFloat,
         imageHeight: CGFloat,
         bundleIdentifier: String?,
-        replyRegion: CGRect?
+        replyRegion: CGRect?,
+        mouseIncludedLineIDs: Set<Int>? = nil
     ) -> [ScreenReplyCapturedLine] {
         lines.map { line in
             let centerX = line.rect.midX
@@ -257,13 +307,14 @@ final class ScreenReplyContextCaptureService {
             } else {
                 speaker = "未知"
             }
-            let includedInReplyContext = Self.shouldIncludeInReplyContext(
-                line: line,
-                imageWidth: imageWidth,
-                imageHeight: imageHeight,
-                bundleIdentifier: bundleIdentifier,
-                replyRegion: replyRegion
-            )
+            let includedInReplyContext = mouseIncludedLineIDs.map { $0.contains(line.id) }
+                ?? Self.shouldIncludeInReplyContext(
+                    line: line,
+                    imageWidth: imageWidth,
+                    imageHeight: imageHeight,
+                    bundleIdentifier: bundleIdentifier,
+                    replyRegion: replyRegion
+                )
             return ScreenReplyCapturedLine(
                 speaker: speaker,
                 text: line.text,
@@ -538,6 +589,149 @@ final class ScreenReplyContextCaptureService {
         )
         guard rect.width > 20, rect.height > 10 else { return nil }
         return rect
+    }
+
+    private static func screenPointInWindow(
+        _ point: CGPoint,
+        windowBounds: CGRect,
+        imageWidth: CGFloat,
+        imageHeight: CGFloat
+    ) -> CGPoint? {
+        guard windowBounds.width > 0, windowBounds.height > 0 else { return nil }
+        guard windowBounds.insetBy(dx: -2, dy: -2).contains(point) else { return nil }
+        let scaleX = imageWidth / windowBounds.width
+        let scaleY = imageHeight / windowBounds.height
+        let converted = CGPoint(
+            x: (point.x - windowBounds.minX) * scaleX,
+            y: (point.y - windowBounds.minY) * scaleY
+        )
+        guard converted.x >= 0,
+              converted.y >= 0,
+              converted.x <= imageWidth,
+              converted.y <= imageHeight else {
+            return nil
+        }
+        return converted
+    }
+
+    private static func windowRectInScreen(
+        _ rect: CGRect,
+        windowBounds: CGRect,
+        imageWidth: CGFloat,
+        imageHeight: CGFloat
+    ) -> CGRect? {
+        guard imageWidth > 0, imageHeight > 0 else { return nil }
+        let scaleX = windowBounds.width / imageWidth
+        let scaleY = windowBounds.height / imageHeight
+        let converted = CGRect(
+            x: windowBounds.minX + rect.minX * scaleX,
+            y: windowBounds.minY + rect.minY * scaleY,
+            width: rect.width * scaleX,
+            height: rect.height * scaleY
+        )
+        guard converted.width > 0, converted.height > 0 else { return nil }
+        return converted
+    }
+
+    private static func mouseFocusedContext(
+        from lines: [OCRLine],
+        mouseLocation: CGPoint,
+        imageWidth: CGFloat,
+        imageHeight: CGFloat,
+        bundleIdentifier: String?
+    ) -> MouseFocusedContext? {
+        let candidates = lines.filter {
+            !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && !isLikelyReplyContextNoise(
+                    line: $0,
+                    imageHeight: imageHeight,
+                    bundleIdentifier: bundleIdentifier
+                )
+        }
+        guard let anchor = candidates.min(by: { lhs, rhs in
+            distance(from: mouseLocation, to: lhs.rect.insetBy(dx: -10, dy: -8))
+                < distance(from: mouseLocation, to: rhs.rect.insetBy(dx: -10, dy: -8))
+        }) else {
+            return nil
+        }
+        guard distance(from: mouseLocation, to: anchor.rect.insetBy(dx: -16, dy: -12)) <= max(80, min(imageWidth, imageHeight) * 0.08) else {
+            return nil
+        }
+
+        var includedIDs: Set<Int> = [anchor.id]
+        var region = anchor.rect.insetBy(dx: -18, dy: -10)
+        var didChange = true
+        while didChange {
+            didChange = false
+            for line in candidates where !includedIDs.contains(line.id) {
+                guard shouldIncludeMouseContextLine(
+                    line,
+                    anchor: anchor,
+                    currentRegion: region,
+                    imageWidth: imageWidth,
+                    imageHeight: imageHeight
+                ) else {
+                    continue
+                }
+                includedIDs.insert(line.id)
+                region = region.union(line.rect).insetBy(dx: -10, dy: -6)
+                didChange = true
+            }
+        }
+
+        let clampedRegion = region.intersection(CGRect(x: 0, y: 0, width: imageWidth, height: imageHeight))
+        guard !clampedRegion.isNull, !includedIDs.isEmpty else { return nil }
+        return MouseFocusedContext(region: clampedRegion, includedLineIDs: includedIDs)
+    }
+
+    private static func shouldIncludeMouseContextLine(
+        _ line: OCRLine,
+        anchor: OCRLine,
+        currentRegion: CGRect,
+        imageWidth: CGFloat,
+        imageHeight: CGFloat
+    ) -> Bool {
+        let verticalPadding = max(46, min(96, imageHeight * 0.08))
+        let horizontalPadding = max(90, min(220, imageWidth * 0.16))
+        let searchRegion = currentRegion.insetBy(dx: -horizontalPadding, dy: -verticalPadding)
+        guard searchRegion.intersects(line.rect) else { return false }
+
+        let expanded = currentRegion.union(line.rect)
+        guard expanded.width <= max(360, imageWidth * 0.72),
+              expanded.height <= max(180, imageHeight * 0.46) else {
+            return false
+        }
+
+        let overlapWidth = max(0, min(currentRegion.maxX, line.rect.maxX) - max(currentRegion.minX, line.rect.minX))
+        let overlapRatio = overlapWidth / max(1, min(currentRegion.width, line.rect.width))
+        let centerDistance = abs(line.rect.midX - anchor.rect.midX)
+        let leftEdgeDistance = abs(line.rect.minX - anchor.rect.minX)
+        let rightEdgeDistance = abs(line.rect.maxX - anchor.rect.maxX)
+        return overlapRatio >= 0.16
+            || centerDistance <= max(120, currentRegion.width * 0.55)
+            || leftEdgeDistance <= 72
+            || rightEdgeDistance <= 96
+    }
+
+    private static func distance(from point: CGPoint, to rect: CGRect) -> CGFloat {
+        let dx: CGFloat
+        if point.x < rect.minX {
+            dx = rect.minX - point.x
+        } else if point.x > rect.maxX {
+            dx = point.x - rect.maxX
+        } else {
+            dx = 0
+        }
+
+        let dy: CGFloat
+        if point.y < rect.minY {
+            dy = rect.minY - point.y
+        } else if point.y > rect.maxY {
+            dy = point.y - rect.maxY
+        } else {
+            dy = 0
+        }
+        return hypot(dx, dy)
     }
 
     private static func replyRegion(

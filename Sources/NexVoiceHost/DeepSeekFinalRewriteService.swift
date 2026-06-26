@@ -136,6 +136,38 @@ final class DeepSeekFinalRewriteService: Sendable {
         )
     }
 
+    func handleMouseContextCommand(
+        capturedText: String,
+        instruction: String,
+        outputLanguage: VoiceOutputLanguage,
+        style: VoiceRewriteStyle = .default,
+        context: VoiceRewriteContext = VoiceRewriteContext()
+    ) async throws -> String {
+        let capturedText = capturedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let instruction = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !capturedText.isEmpty else { throw DeepSeekFinalRewriteError.emptyRewrite }
+        let promptPlan = VoiceRewritePromptPolicy.mouseContextCommandPromptPlan(
+            capturedText: capturedText,
+            instruction: instruction,
+            outputLanguage: outputLanguage,
+            style: style,
+            context: context
+        )
+        let instructionCharacters = capturedText.count + instruction.count
+
+        return try await complete(
+            promptPlan: promptPlan,
+            operation: "mouse_context_command",
+            outputLanguage: outputLanguage,
+            style: style,
+            selectedTextCharacters: capturedText.count,
+            instructionCharacters: instructionCharacters,
+            context: context,
+            temperature: style.rewriteTemperature,
+            sourceText: nil
+        )
+    }
+
     private func complete(
         promptPlan: VoiceRewritePromptPlan,
         operation: String,

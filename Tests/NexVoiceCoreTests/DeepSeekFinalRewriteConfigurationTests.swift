@@ -327,6 +327,36 @@ import Testing
     #expect(prompt.contains("对方：这个方案今天能定吗？"))
 }
 
+@Test func mouseContextCommandPromptAnswersFromNearbyOCRText() {
+    let prompt = VoiceRewritePromptPolicy.mouseContextCommandPrompt(
+        capturedText: """
+        Pro plan
+        $20 per month
+        Includes advanced workflows
+        """,
+        instruction: "这个价格合理吗？",
+        outputLanguage: .simplifiedChinese,
+        style: .standard,
+        context: VoiceRewriteContext(sourceApplicationName: "Safari")
+    )
+
+    #expect(prompt.contains("鼠标位置问答模式"))
+    #expect(prompt.contains("用户鼠标附近 OCR 识别出的文字块"))
+    #expect(prompt.contains("只基于这块可见文字回答用户语音问题"))
+    #expect(prompt.contains("不够判断"))
+    #expect(prompt.contains("这个价格合理吗？"))
+    #expect(prompt.contains("$20 per month"))
+    #expect(prompt.contains("Safari"))
+    #expect(!prompt.contains("替用户生成一条可以直接填入当前输入框的新回复"))
+}
+
+@Test func mouseContextCommandPolicyOnlyRoutesQuestionLikeInstructions() {
+    #expect(VoiceMouseContextCommandPolicy.shouldAnswerFromMouseContext(instruction: "这个是什么意思？"))
+    #expect(VoiceMouseContextCommandPolicy.shouldAnswerFromMouseContext(instruction: "帮我总结一下这块"))
+    #expect(VoiceMouseContextCommandPolicy.shouldAnswerFromMouseContext(instruction: "explain this"))
+    #expect(!VoiceMouseContextCommandPolicy.shouldAnswerFromMouseContext(instruction: "用更强硬一点的语气回复第二句"))
+}
+
 @Test func rewriteOutputSanitizerRemovesMarkdownDecorationForPlainTextInputs() {
     let output = VoiceRewriteOutputSanitizer.sanitize("""
     # 结论

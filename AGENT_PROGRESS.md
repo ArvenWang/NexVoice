@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-- 当前工作目录：`/Users/nefish/Desktop/WorkSpace/Coding/NexVoice`。
+- 当前工作目录：`/Users/nefish/Desktop/Coding/NexVoice`。
 - 项目形态：SwiftPM macOS 菜单栏 App，核心模块为 `NexVoiceCore`，宿主为 `NexVoiceHost`。
 - 默认入口：短按右 Alt 开始语音输入，再按一次结束；长按右 Alt 约 0.55 秒进入看屏自动回复；ESC 可取消录音、等待 final、AI 改写或看屏回复中的会话。
 - 当前主链路：腾讯云实时 ASR `16k_zh_en` -> DeepSeek `deepseek-v4-flash` 最终整理 -> 写入当前聚焦输入框。
@@ -12,6 +12,69 @@
 - 本地 SenseVoice Small 和 WhisperKit large-v3 保留为兜底和质量对照，不是当前默认主链路。
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
+
+## 本轮追加（2026-06-26：鼠标位置 OCR 问答第一阶段/第二阶段）
+
+- 用户明确范围：
+  - 只针对文字做 OCR，不引入图片视觉模型。
+  - 优先完成第一阶段“鼠标附近文字块捕获 + 问答”和第二阶段“浮层结果展示”。
+  - 必须记录日志，让用户能看到每次指令实际抓到了什么文字。
+- 本轮实现：
+  - 长按右 Alt 进入看屏语音指令时，会把当前鼠标位置传给 `ScreenReplyContextCaptureService`。
+  - OCR 识别当前前台窗口后，优先找鼠标附近命中的文字行，并按周边同列/同段落关系扩展成一个文字块。
+  - 如果鼠标附近找不到可靠文字块，回退到原来的看屏回复区域逻辑。
+  - 如果语音指令像问答/总结/解释/翻译/分析类问题，走新的 `mouse_context_command`，答案以鼠标附近浮层展示并可复制，不自动写入输入框。
+  - 如果语音指令不像问答，例如“用更强硬一点回复第二句”，仍保留原来的看屏回复插入逻辑，避免破坏旧能力。
+- 日志：
+  - 仍写入 `~/Library/Application Support/NexVoice/Logs/ScreenReply.jsonl`。
+  - 新增/扩展字段：`captureMode`、`mouseLocation`、`mouseRegion`、`lines[].includedInReplyContext`。
+  - 新增事件：`mouse_context_generating`、`mouse_context_succeeded`、`mouse_context_failed`。
+  - 复测时重点看 `captureMode=mouseRegion`，以及 `includedInReplyContext=true` 的 OCR 行是否就是鼠标附近应被回答的文字块。
+- 版本递增：`0.1.43 (44)` -> `0.1.44 (45)`。
+- 已构建并安装新版：
+  - App：`dist/NexVoice.app`
+  - 安装路径：`/Applications/NexVoice.app`
+  - 旧版备份：`dist/install-backups/NexVoice-20260626-230905.app`
+  - 当前运行 PID：`92095`
+  - 新 DMG：`dist/NexVoice-0.1.44-build45-mouse-context-ocr-embedded-keys-20260626.dmg`
+- 验证：
+  - `git diff --check` 通过。
+  - `swift test --disable-sandbox --filter DeepSeekFinalRewriteConfiguration --quiet` 通过，27 个测试。
+  - `swift test --disable-sandbox --quiet` 通过，150 个测试。
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 通过。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过。
+  - `/Applications/NexVoice.app` 签名、版本号和嵌入配置检查通过。
+  - `hdiutil verify dist/NexVoice-0.1.44-build45-mouse-context-ocr-embedded-keys-20260626.dmg` 通过。
+- 需要用户复测：
+  - 把鼠标放到网页/图片/PDF/聊天窗口中一段可见文字附近，长按右 Alt 后问“这是什么意思 / 帮我总结一下 / 这个合理吗”。
+  - 预期：答案以鼠标附近浮层显示，不自动插入输入框。
+  - 复测后查看 `ScreenReply.jsonl`，确认 `visibleText` 和 `includedInReplyContext=true` 的行是否符合鼠标附近文字块。
+
+## 本轮接力（2026-06-26：拉取最新 main 并构建启动）
+
+- 已安全接力最新远端代码：
+  - 先确认本地工作区干净。
+  - `git fetch --all --prune` 后发现远端 `main` 从 `b7b19f9` 更新到 `23e0f25`。
+  - `git pull --ff-only` 已把本地 `main` 快进到 `23e0f25 Fix trusted draft handling and English rewrite output`。
+- 当前进展判断：
+  - 最新主线是修复 Web / Electron / Codex 输入框提示文案被误当成真实草稿的问题。
+  - 同时修复英文输出模式下 DeepSeek 返回 `Here's the polished version...` 这类说明性外壳的问题。
+  - 仍需要用户做真实右 Alt 语音复测；重点看 Codex / Chrome 空输入框提示文案是否不再进入输出或 DeepSeek 上下文。
+- 已构建并安装新版：
+  - App：`dist/NexVoice.app`
+  - 安装路径：`/Applications/NexVoice.app`
+  - 旧版备份：`dist/install-backups/NexVoice-20260626-224227.app`
+  - 当前运行 PID：`42973`
+  - 包内版本：`0.1.43 (44)`
+  - 已确认包内包含本机 `DeepSeek.json` 与 `TencentCloudASR.json` 嵌入配置，未暴露密钥内容。
+- 验证：
+  - `git diff --check` 通过。
+  - `swift test --disable-sandbox --quiet` 通过，148 个测试。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过。
+  - `plutil -lint dist/NexVoice.app/Contents/Info.plist` 通过。
+  - `/Applications/NexVoice.app` 签名、版本号和嵌入配置检查通过。
 
 ## 本轮追加（2026-06-26：修复英文输出时模型说明外壳泄漏）
 

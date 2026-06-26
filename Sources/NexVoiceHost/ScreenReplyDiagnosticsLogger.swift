@@ -47,6 +47,7 @@ struct ScreenReplyDiagnosticEvent: Encodable {
     let timestamp: String
     let captureID: String
     let event: String
+    let captureMode: ScreenReplyCaptureMode?
     let appName: String?
     let bundleIdentifier: String?
     let windowTitle: String?
@@ -54,6 +55,8 @@ struct ScreenReplyDiagnosticEvent: Encodable {
     let imageHeight: Int?
     let inputFrame: ScreenReplyDiagnosticRect?
     let replyRegion: ScreenReplyDiagnosticRect?
+    let mouseLocation: ScreenReplyDiagnosticPoint?
+    let mouseRegion: ScreenReplyDiagnosticRect?
     let lineCount: Int?
     let visibleTextCharacters: Int?
     let structuredMessagesCharacters: Int?
@@ -69,6 +72,7 @@ struct ScreenReplyDiagnosticEvent: Encodable {
     init(
         captureID: String,
         event: String,
+        captureMode: ScreenReplyCaptureMode? = nil,
         appName: String? = nil,
         bundleIdentifier: String? = nil,
         windowTitle: String? = nil,
@@ -76,6 +80,8 @@ struct ScreenReplyDiagnosticEvent: Encodable {
         imageHeight: Int? = nil,
         inputFrame: CGRect? = nil,
         replyRegion: CGRect? = nil,
+        mouseLocation: CGPoint? = nil,
+        mouseRegion: CGRect? = nil,
         lineCount: Int? = nil,
         visibleText: String? = nil,
         structuredMessages: String? = nil,
@@ -87,6 +93,7 @@ struct ScreenReplyDiagnosticEvent: Encodable {
         self.timestamp = ISO8601DateFormatter().string(from: Date())
         self.captureID = captureID
         self.event = event
+        self.captureMode = captureMode
         self.appName = appName
         self.bundleIdentifier = bundleIdentifier
         self.windowTitle = windowTitle
@@ -94,6 +101,8 @@ struct ScreenReplyDiagnosticEvent: Encodable {
         self.imageHeight = imageHeight
         self.inputFrame = inputFrame.map(ScreenReplyDiagnosticRect.init)
         self.replyRegion = replyRegion.map(ScreenReplyDiagnosticRect.init)
+        self.mouseLocation = mouseLocation.map(ScreenReplyDiagnosticPoint.init)
+        self.mouseRegion = mouseRegion.map(ScreenReplyDiagnosticRect.init)
         self.lineCount = lineCount
         self.visibleTextCharacters = visibleText?.count
         self.structuredMessagesCharacters = structuredMessages?.count
@@ -127,5 +136,15 @@ struct ScreenReplyDiagnosticRect: Encodable {
         self.y = rect.origin.y
         self.width = rect.width
         self.height = rect.height
+    }
+}
+
+struct ScreenReplyDiagnosticPoint: Encodable {
+    let x: Double
+    let y: Double
+
+    init(_ point: CGPoint) {
+        self.x = point.x
+        self.y = point.y
     }
 }

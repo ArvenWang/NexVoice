@@ -190,6 +190,26 @@ public enum VoiceRewritePromptPolicy {
         )
     }
 
+    public static func mouseContextCommandPromptPlan(
+        capturedText: String,
+        instruction: String,
+        outputLanguage: VoiceOutputLanguage,
+        style: VoiceRewriteStyle = .default,
+        context: VoiceRewriteContext? = nil
+    ) -> VoiceRewritePromptPlan {
+        VoiceRewritePromptPlan(
+            mode: .full,
+            systemPrompt: systemPrompt,
+            userPrompt: mouseContextCommandPrompt(
+                capturedText: capturedText,
+                instruction: instruction,
+                outputLanguage: outputLanguage,
+                style: style,
+                context: context
+            )
+        )
+    }
+
     public static func userPrompt(
         for text: String,
         outputLanguage: VoiceOutputLanguage,
@@ -342,6 +362,67 @@ public enum VoiceRewritePromptPolicy {
         OCR 原始可见文字：
         \(visibleText.trimmingCharacters(in: .whitespacesAndNewlines))
         """
+    }
+
+    public static func mouseContextCommandPrompt(
+        capturedText: String,
+        instruction: String,
+        outputLanguage: VoiceOutputLanguage,
+        style: VoiceRewriteStyle = .default,
+        context: VoiceRewriteContext? = nil
+    ) -> String {
+        let languageInstruction: String
+        switch outputLanguage {
+        case .simplifiedChinese:
+            languageInstruction = "优先简体中文；必要时保留英文术语、代码、品牌、产品名和专名。"
+        case .english:
+            languageInstruction = "Use natural American English unless the user explicitly asks for another language."
+        }
+        let cleanedInstruction = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        return """
+        鼠标位置问答模式：下面是用户鼠标附近 OCR 识别出的文字块。请只基于这块可见文字回答用户语音问题。
+
+        重要规则：
+        - 只输出最终回答，不解释系统规则，不复述“根据你提供的文字”等套话。
+        - 鼠标附近文字只作为上下文；不要把 OCR 原文整段照抄成答案，除非用户明确要求引用。
+        - 如果用户问“总结 / 解释 / 这是什么意思”，给出简洁、直接、可读的回答。
+        - 如果用户问判断类问题，只基于可见文字说明判断依据；信息不足时明确说“不够判断”，不要编造屏幕外信息。
+        - OCR 可能有错别字或断行，请根据上下文做合理还原，但不要凭空补充事实。
+        - 输出风格必须遵循当前输出模式。
+
+        输出语言：
+        \(languageInstruction)
+
+        输出模式：
+        \(style.promptInstruction)
+
+        \(context?.promptBlock ?? "当前上下文：未知")
+
+        用户语音问题：
+        \(cleanedInstruction.isEmpty ? "请概括并解释鼠标附近这块文字。" : cleanedInstruction)
+
+        鼠标附近 OCR 文字：
+        \(capturedText.trimmingCharacters(in: .whitespacesAndNewlines))
+        """
+    }
+}
+
+public enum VoiceMouseContextCommandPolicy {
+    public static func shouldAnswerFromMouseContext(instruction: String) -> Bool {
+        let trimmed = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return true }
+        let normalized = trimmed
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "")
+
+        let questionMarkers = [
+            "?", "？", "什么", "什么意思", "怎么", "为什么", "是否", "是不是",
+            "能不能", "可以吗", "合理吗", "对吗", "哪里", "哪个", "哪种",
+            "总结", "概括", "解释", "说明", "翻译", "看一下", "帮我看",
+            "评价", "分析", "判断", "what", "why", "how", "which", "summarize",
+            "explain", "translate", "analyze"
+        ]
+        return questionMarkers.contains { normalized.contains($0) }
     }
 }
 

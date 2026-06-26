@@ -472,7 +472,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let focusedInputFrame = self.textInserter.focusedInputFrame(in: targetApplication)
                 capturedContext = try await self.screenReplyCaptureService.capture(
                     from: targetApplication,
-                    focusedInputFrame: focusedInputFrame
+                    focusedInputFrame: focusedInputFrame,
+                    mouseScreenLocation: NSEvent.mouseLocation
                 )
             } catch is CancellationError {
                 return
@@ -490,6 +491,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                       self.isScreenReplyInstructionSession else { return }
                 self.screenReplyCapturedContextForCurrentSession = capturedContext
                 self.rewriteTask = nil
+                if capturedContext.captureMode == .mouseRegion {
+                    self.captionPanel.showPassiveMessage(
+                        "已读取鼠标附近文字",
+                        anchorRect: capturedContext.mouseAnchorRectInScreen
+                    )
+                }
                 if let instruction = self.pendingScreenReplyVoiceInstruction {
                     self.pendingScreenReplyVoiceInstruction = nil
                     self.generateScreenReply(voiceInstruction: instruction)
@@ -1006,6 +1013,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refreshMenuState()
             return
         }
+        if capturedContext.captureMode == .mouseRegion,
+           VoiceMouseContextCommandPolicy.shouldAnswerFromMouseContext(instruction: trimmedInstruction) {
+            generateMouseContextAnswer(
+                capturedContext: capturedContext,
+                voiceInstruction: trimmedInstruction
+            )
+            return
+        }
         guard !didInsertCurrentSession else { return }
         didInsertCurrentSession = true
         isRewritingCurrentSession = true
@@ -1029,11 +1044,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ScreenReplyDiagnosticEvent(
                     captureID: capturedContext.captureID,
                     event: "generating",
+                    captureMode: capturedContext.captureMode,
                     appName: capturedContext.appName,
                     bundleIdentifier: capturedContext.bundleIdentifier,
                     windowTitle: capturedContext.windowTitle,
                     inputFrame: capturedContext.inputFrameInWindow,
                     replyRegion: capturedContext.replyRegionInWindow,
+                    mouseLocation: capturedContext.mouseLocationInWindow,
+                    mouseRegion: capturedContext.mouseRegionInWindow,
                     lineCount: capturedContext.lineCount,
                     visibleText: capturedContext.visibleText,
                     structuredMessages: capturedContext.structuredMessages,
@@ -1058,11 +1076,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     ScreenReplyDiagnosticEvent(
                         captureID: capturedContext.captureID,
                         event: "failed",
+                        captureMode: capturedContext.captureMode,
                         appName: capturedContext.appName,
                         bundleIdentifier: capturedContext.bundleIdentifier,
                         windowTitle: capturedContext.windowTitle,
                         inputFrame: capturedContext.inputFrameInWindow,
                         replyRegion: capturedContext.replyRegionInWindow,
+                        mouseLocation: capturedContext.mouseLocationInWindow,
+                        mouseRegion: capturedContext.mouseRegionInWindow,
                         lineCount: capturedContext.lineCount,
                         visibleText: capturedContext.visibleText,
                         structuredMessages: capturedContext.structuredMessages,
@@ -1082,11 +1103,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ScreenReplyDiagnosticEvent(
                     captureID: capturedContext.captureID,
                     event: "succeeded",
+                    captureMode: capturedContext.captureMode,
                     appName: capturedContext.appName,
                     bundleIdentifier: capturedContext.bundleIdentifier,
                     windowTitle: capturedContext.windowTitle,
                     inputFrame: capturedContext.inputFrameInWindow,
                     replyRegion: capturedContext.replyRegionInWindow,
+                    mouseLocation: capturedContext.mouseLocationInWindow,
+                    mouseRegion: capturedContext.mouseRegionInWindow,
                     lineCount: capturedContext.lineCount,
                     visibleText: capturedContext.visibleText,
                     structuredMessages: capturedContext.structuredMessages,
@@ -1099,6 +1123,120 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await MainActor.run {
                 guard !self.isCurrentSessionCancelled else { return }
                 self.insertScreenReply(reply, into: targetApplication)
+            }
+        }
+    }
+
+    private func generateMouseContextAnswer(
+        capturedContext: ScreenReplyCapturedContext,
+        voiceInstruction: String
+    ) {
+        guard !didInsertCurrentSession else { return }
+        didInsertCurrentSession = true
+        isRewritingCurrentSession = true
+        captionPanel.showLoading("AI 回答中", anchorRect: capturedContext.mouseAnchorRectInScreen)
+        statusItem?.button?.title = "NexVoice AI 回答中"
+        refreshMenuState()
+
+        let outputLanguage = selectedOutputLanguage
+        let rewriteContext = rewriteContextForCurrentSession ?? VoiceRewriteContext(
+            sourceApplicationName: targetApplicationForCurrentSession?.localizedName,
+            sourceApplicationBundleIdentifier: targetApplicationForCurrentSession?.bundleIdentifier,
+            personalDictionary: VoicePersonalDictionaryStore.load()
+        )
+        let rewriteStyle = rewriteStyle(for: rewriteContext)
+
+        rewriteTask?.cancel()
+        rewriteTask = Task { [weak self] in
+            guard let self else { return }
+            await ScreenReplyDiagnosticsLogger.shared.log(
+                ScreenReplyDiagnosticEvent(
+                    captureID: capturedContext.captureID,
+                    event: "mouse_context_generating",
+                    captureMode: capturedContext.captureMode,
+                    appName: capturedContext.appName,
+                    bundleIdentifier: capturedContext.bundleIdentifier,
+                    windowTitle: capturedContext.windowTitle,
+                    inputFrame: capturedContext.inputFrameInWindow,
+                    replyRegion: capturedContext.replyRegionInWindow,
+                    mouseLocation: capturedContext.mouseLocationInWindow,
+                    mouseRegion: capturedContext.mouseRegionInWindow,
+                    lineCount: capturedContext.lineCount,
+                    visibleText: capturedContext.visibleText,
+                    structuredMessages: capturedContext.structuredMessages,
+                    lines: capturedContext.lines,
+                    voiceInstruction: voiceInstruction
+                )
+            )
+
+            let answer: String
+            do {
+                answer = try await self.finalRewriteService.handleMouseContextCommand(
+                    capturedText: capturedContext.visibleText,
+                    instruction: voiceInstruction,
+                    outputLanguage: outputLanguage,
+                    style: rewriteStyle,
+                    context: rewriteContext
+                )
+            } catch is CancellationError {
+                return
+            } catch {
+                await ScreenReplyDiagnosticsLogger.shared.log(
+                    ScreenReplyDiagnosticEvent(
+                        captureID: capturedContext.captureID,
+                        event: "mouse_context_failed",
+                        captureMode: capturedContext.captureMode,
+                        appName: capturedContext.appName,
+                        bundleIdentifier: capturedContext.bundleIdentifier,
+                        windowTitle: capturedContext.windowTitle,
+                        inputFrame: capturedContext.inputFrameInWindow,
+                        replyRegion: capturedContext.replyRegionInWindow,
+                        mouseLocation: capturedContext.mouseLocationInWindow,
+                        mouseRegion: capturedContext.mouseRegionInWindow,
+                        lineCount: capturedContext.lineCount,
+                        visibleText: capturedContext.visibleText,
+                        structuredMessages: capturedContext.structuredMessages,
+                        lines: capturedContext.lines,
+                        voiceInstruction: voiceInstruction,
+                        errorMessage: error.localizedDescription
+                    )
+                )
+                await MainActor.run {
+                    guard !self.isCurrentSessionCancelled else { return }
+                    self.finishScreenReplyWithError(error)
+                }
+                return
+            }
+            guard !Task.isCancelled else { return }
+
+            await ScreenReplyDiagnosticsLogger.shared.log(
+                ScreenReplyDiagnosticEvent(
+                    captureID: capturedContext.captureID,
+                    event: "mouse_context_succeeded",
+                    captureMode: capturedContext.captureMode,
+                    appName: capturedContext.appName,
+                    bundleIdentifier: capturedContext.bundleIdentifier,
+                    windowTitle: capturedContext.windowTitle,
+                    inputFrame: capturedContext.inputFrameInWindow,
+                    replyRegion: capturedContext.replyRegionInWindow,
+                    mouseLocation: capturedContext.mouseLocationInWindow,
+                    mouseRegion: capturedContext.mouseRegionInWindow,
+                    lineCount: capturedContext.lineCount,
+                    visibleText: capturedContext.visibleText,
+                    structuredMessages: capturedContext.structuredMessages,
+                    lines: capturedContext.lines,
+                    voiceInstruction: voiceInstruction,
+                    reply: answer
+                )
+            )
+
+            await MainActor.run {
+                guard !self.isCurrentSessionCancelled else { return }
+                self.finishScreenReplyInstructionSession()
+                self.showContextualResult(
+                    answer,
+                    anchorRect: capturedContext.mouseAnchorRectInScreen
+                )
             }
         }
     }
