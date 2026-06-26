@@ -1,6 +1,6 @@
 # NexVoice 当前进展
 
-更新时间：2026-06-26
+更新时间：2026-06-27
 
 ## 当前状态
 
@@ -12,6 +12,50 @@
 - 本地 SenseVoice Small 和 WhisperKit large-v3 保留为兜底和质量对照，不是当前默认主链路。
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
+
+## 本轮追加（2026-06-27：鼠标问答改为独立纯视觉 OCR 链路）
+
+- 用户要求：
+  - 看屏回复和鼠标问答必须是两套不同逻辑，不要混淆或耦合。
+  - 鼠标问答应是纯视觉逻辑：围绕鼠标位置截屏、OCR、选取附近文字上下文，再进行问答。
+  - 需要继续保留日志，能看清每次鼠标问答实际抓取了什么区域和什么文字。
+- 本轮修复：
+  - 新增 `MouseContextCaptureService`，鼠标问答不再调用 `ScreenReplyContextCaptureService.capture(...)`。
+  - 鼠标问答不再扫描前台窗口列表，不再依赖前台窗口标题、窗口大小、窗口坐标，也不再走看屏回复的输入框/回复区域推断。
+  - 双击鼠标问答现在直接按鼠标屏幕坐标截取周边屏幕区域，用 Vision OCR 识别本地文字。
+  - OCR 框立即显示在鼠标附近；真正识别完成后，框会收缩到实际进入问答上下文的文字自然段。
+  - 为避免 OCR 框污染截图，截图时使用“OCR 覆盖层下面”的屏幕内容，不把蓝色高亮层自身截进去。
+  - `visibleText`、`lines.includedInReplyContext`、`mouseRegionInScreen` 使用同一批 OCR 行，避免“框很小但回答用了更大上下文”的错位。
+  - `ScreenReply.jsonl` 新增 `screenCaptureRegion` 字段；鼠标问答新增 `mouse_visual_captured`、`mouse_visual_no_text`、`mouse_visual_region_missed` 事件，能看到屏幕截图范围、最终框选范围、OCR 文本、耗时和失败原因。
+  - 鼠标问答生成、成功、失败日志补齐 `mouseRegionInScreen`，方便按同一 `captureID` 串起来排查。
+- 明确保留的边界：
+  - 长按“看屏回复”仍由 `ScreenReplyContextCaptureService` 负责，继续按窗口和输入框上下文处理。
+  - 双击“鼠标问答”由 `MouseContextCaptureService` 负责，纯屏幕视觉 OCR，不调用看屏回复捕获逻辑。
+  - 划词问答仍走选中文字，不受鼠标 OCR 改动影响。
+- 已验证：
+  - `git diff --check` 通过。
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 通过。
+  - `swift test --disable-sandbox --quiet` 通过，150 个测试。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=2 dist/NexVoice.app` 通过。
+  - `codesign --verify --deep --strict --verbose=2 /Applications/NexVoice.app` 通过。
+  - `plutil -lint dist/NexVoice.app/Contents/Info.plist /Applications/NexVoice.app/Contents/Info.plist` 通过。
+  - `/Applications/NexVoice.app/Contents/Resources/NexVoiceEmbeddedConfig/DeepSeek.json` 和 `TencentCloudASR.json` 存在，未在日志或进展中展示密钥内容。
+  - `hdiutil verify dist/NexVoice-0.1.52-build53-visual-mouse-ocr-embedded-keys-20260627.dmg` 通过。
+- 已构建并安装新版：
+  - App：`dist/NexVoice.app`
+  - 安装路径：`/Applications/NexVoice.app`
+  - 当前运行 PID：`82017`
+  - 旧版备份：`dist/install-backups/20260627-021245-NexVoice.app`
+  - 新 DMG：`dist/NexVoice-0.1.52-build53-visual-mouse-ocr-embedded-keys-20260627.dmg`
+- Git：
+  - 本轮本地提交：`Decouple mouse context OCR capture`
+  - 当前 `main` 比 `origin/main` 多 9 个提交。
+  - 远端推送仍失败：`fatal: could not read Username for 'https://github.com': Device not configured`，需要用户补 GitHub HTTPS 凭据后再推送。
+- 需要用户复测：
+  - 企业微信图片预览窗口在前台时，双击鼠标问答应能立即出现 OCR 框并进入录音问答流程。
+  - 普通网页或图片中文字上双击时，OCR 框应覆盖实际进入回答上下文的自然段，不再出现框和回答内容不一致。
+  - `~/Library/Application Support/NexVoice/Logs/ScreenReply.jsonl` 中同一 `captureID` 的 `screenCaptureRegion`、`mouseRegionInScreen`、`visibleText` 应能解释本次回答用了什么上下文。
 
 ## 本轮追加（2026-06-27：调整 OCR 高亮层级、样式和范围）
 

@@ -63,6 +63,7 @@ struct ScreenReplyDiagnosticEvent: Encodable {
     let ocrCropRegion: ScreenReplyDiagnosticRect?
     let mouseRegion: ScreenReplyDiagnosticRect?
     let mouseRegionInScreen: ScreenReplyDiagnosticRect?
+    let screenCaptureRegion: ScreenReplyDiagnosticRect?
     let captureDurationMs: Double?
     let ocrDurationMs: Double?
     let lineCount: Int?
@@ -99,6 +100,7 @@ struct ScreenReplyDiagnosticEvent: Encodable {
         ocrCropRegion: CGRect? = nil,
         mouseRegion: CGRect? = nil,
         mouseRegionInScreen: CGRect? = nil,
+        screenCaptureRegion: CGRect? = nil,
         captureDurationMs: Double? = nil,
         ocrDurationMs: Double? = nil,
         lineCount: Int? = nil,
@@ -130,6 +132,7 @@ struct ScreenReplyDiagnosticEvent: Encodable {
         self.ocrCropRegion = ocrCropRegion.map(ScreenReplyDiagnosticRect.init)
         self.mouseRegion = mouseRegion.map(ScreenReplyDiagnosticRect.init)
         self.mouseRegionInScreen = mouseRegionInScreen.map(ScreenReplyDiagnosticRect.init)
+        self.screenCaptureRegion = screenCaptureRegion.map(ScreenReplyDiagnosticRect.init)
         self.captureDurationMs = captureDurationMs
         self.ocrDurationMs = ocrDurationMs
         self.lineCount = lineCount

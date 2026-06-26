@@ -24,6 +24,10 @@ final class OCRRegionOverlayController {
         panel.contentView = highlightView
     }
 
+    var windowNumber: Int {
+        panel.windowNumber
+    }
+
     func show(region: CGRect, autoHideAfter delay: TimeInterval? = nil) {
         guard region.width > 4, region.height > 4 else { return }
         hideWorkItem?.cancel()

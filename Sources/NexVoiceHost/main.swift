@@ -40,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let transcriptionService = TencentCloudRealtimeTranscriptionService()
     private let finalRewriteService = DeepSeekFinalRewriteService()
     private let screenReplyCaptureService = ScreenReplyContextCaptureService()
+    private let mouseContextCaptureService = MouseContextCaptureService()
     private let captionPanel = VoiceCaptionPanelController()
     private let ocrRegionOverlay = OCRRegionOverlayController()
     private let textInserter = FocusedTextInserter()
@@ -760,14 +761,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        contextCaptureTask = Task { [weak self, targetApplication, mouseLocation] in
+        let overlayWindowNumber = ocrRegionOverlay.windowNumber
+        contextCaptureTask = Task { [weak self, targetApplication, mouseLocation, overlayWindowNumber] in
             guard let self else { return }
             let capturedContext: ScreenReplyCapturedContext
             do {
-                capturedContext = try await self.screenReplyCaptureService.capture(
-                    from: targetApplication,
-                    focusedInputFrame: nil,
+                capturedContext = try await self.mouseContextCaptureService.capture(
                     mouseScreenLocation: mouseLocation,
+                    appName: targetApplication?.localizedName,
+                    bundleIdentifier: targetApplication?.bundleIdentifier,
+                    excludingWindowNumber: overlayWindowNumber,
                     interactionMode: self.contextCaptureInteractionModeForCurrentSession?.rawValue
                 )
                 guard capturedContext.captureMode == .mouseRegion else {
@@ -1519,6 +1522,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     replyRegion: capturedContext.replyRegionInWindow,
                     mouseLocation: capturedContext.mouseLocationInWindow,
                     mouseRegion: capturedContext.mouseRegionInWindow,
+                    mouseRegionInScreen: capturedContext.mouseRegionInScreen,
                     lineCount: capturedContext.lineCount,
                     visibleText: capturedContext.visibleText,
                     structuredMessages: capturedContext.structuredMessages,
@@ -1552,6 +1556,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         replyRegion: capturedContext.replyRegionInWindow,
                         mouseLocation: capturedContext.mouseLocationInWindow,
                         mouseRegion: capturedContext.mouseRegionInWindow,
+                        mouseRegionInScreen: capturedContext.mouseRegionInScreen,
                         lineCount: capturedContext.lineCount,
                         visibleText: capturedContext.visibleText,
                         structuredMessages: capturedContext.structuredMessages,
@@ -1581,6 +1586,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     replyRegion: capturedContext.replyRegionInWindow,
                     mouseLocation: capturedContext.mouseLocationInWindow,
                     mouseRegion: capturedContext.mouseRegionInWindow,
+                    mouseRegionInScreen: capturedContext.mouseRegionInScreen,
                     lineCount: capturedContext.lineCount,
                     visibleText: capturedContext.visibleText,
                     structuredMessages: capturedContext.structuredMessages,
@@ -1878,22 +1884,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func preliminaryMouseOCRRegion(around anchorRect: CGRect) -> CGRect {
-        let size = CGSize(width: 380, height: 190)
-        let rawRegion = CGRect(
-            x: anchorRect.midX - size.width / 2,
-            y: anchorRect.midY - size.height / 2,
-            width: size.width,
-            height: size.height
-        )
-        guard let visibleFrame = (NSScreen.screens.first { $0.frame.contains(anchorRect.origin) } ?? NSScreen.main)?.visibleFrame else {
-            return rawRegion
-        }
-        return CGRect(
-            x: min(max(rawRegion.minX, visibleFrame.minX), max(visibleFrame.minX, visibleFrame.maxX - rawRegion.width)),
-            y: min(max(rawRegion.minY, visibleFrame.minY), max(visibleFrame.minY, visibleFrame.maxY - rawRegion.height)),
-            width: min(rawRegion.width, visibleFrame.width),
-            height: min(rawRegion.height, visibleFrame.height)
-        )
+        MouseContextCaptureService.previewRegion(around: anchorRect.origin)
     }
 
     @objc private func quit() {
