@@ -18,6 +18,7 @@ struct ScreenReplyCapturedContext: Sendable {
     let mouseLocationInWindow: CGPoint?
     let mouseRegionInWindow: CGRect?
     let mouseAnchorRectInScreen: CGRect?
+    let mouseRegionInScreen: CGRect?
 }
 
 enum ScreenReplyCaptureMode: String, Encodable, Sendable {
@@ -145,6 +146,14 @@ final class ScreenReplyContextCaptureService {
         let replyLines = capturedLines.filter(\.includedInReplyContext)
         let visibleText = replyLines.map(\.text).joined(separator: "\n")
         let structuredMessages = Self.structuredMessages(from: replyLines)
+        let mouseRegionInScreen = mouseContext.flatMap {
+            Self.windowRectInScreen(
+                $0.region,
+                windowBounds: window.bounds,
+                imageWidth: CGFloat(image.width),
+                imageHeight: CGFloat(image.height)
+            )
+        }
         await ScreenReplyDiagnosticsLogger.shared.log(
             ScreenReplyDiagnosticEvent(
                 captureID: captureID,
@@ -160,6 +169,7 @@ final class ScreenReplyContextCaptureService {
                 replyRegion: replyRegion,
                 mouseLocation: mouseLocationInWindow,
                 mouseRegion: mouseContext?.region,
+                mouseRegionInScreen: mouseRegionInScreen,
                 lineCount: lines.count,
                 visibleText: visibleText,
                 structuredMessages: structuredMessages,
@@ -180,14 +190,8 @@ final class ScreenReplyContextCaptureService {
             replyRegionInWindow: replyRegion,
             mouseLocationInWindow: mouseLocationInWindow,
             mouseRegionInWindow: mouseContext?.region,
-            mouseAnchorRectInScreen: mouseContext.flatMap {
-                Self.windowRectInScreen(
-                    $0.region,
-                    windowBounds: window.bounds,
-                    imageWidth: CGFloat(image.width),
-                    imageHeight: CGFloat(image.height)
-                )
-            } ?? mouseScreenLocation.map { CGRect(origin: $0, size: .zero) }
+            mouseAnchorRectInScreen: mouseScreenLocation.map { CGRect(origin: $0, size: .zero) },
+            mouseRegionInScreen: mouseRegionInScreen
         )
     }
 

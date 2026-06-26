@@ -58,6 +58,7 @@ struct ScreenReplyDiagnosticEvent: Encodable {
     let replyRegion: ScreenReplyDiagnosticRect?
     let mouseLocation: ScreenReplyDiagnosticPoint?
     let mouseRegion: ScreenReplyDiagnosticRect?
+    let mouseRegionInScreen: ScreenReplyDiagnosticRect?
     let lineCount: Int?
     let visibleTextCharacters: Int?
     let structuredMessagesCharacters: Int?
@@ -87,6 +88,7 @@ struct ScreenReplyDiagnosticEvent: Encodable {
         replyRegion: CGRect? = nil,
         mouseLocation: CGPoint? = nil,
         mouseRegion: CGRect? = nil,
+        mouseRegionInScreen: CGRect? = nil,
         lineCount: Int? = nil,
         visibleText: String? = nil,
         structuredMessages: String? = nil,
@@ -111,6 +113,7 @@ struct ScreenReplyDiagnosticEvent: Encodable {
         self.replyRegion = replyRegion.map(ScreenReplyDiagnosticRect.init)
         self.mouseLocation = mouseLocation.map(ScreenReplyDiagnosticPoint.init)
         self.mouseRegion = mouseRegion.map(ScreenReplyDiagnosticRect.init)
+        self.mouseRegionInScreen = mouseRegionInScreen.map(ScreenReplyDiagnosticRect.init)
         self.lineCount = lineCount
         self.visibleTextCharacters = visibleText?.count
         self.structuredMessagesCharacters = structuredMessages?.count

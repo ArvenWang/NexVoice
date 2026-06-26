@@ -291,6 +291,7 @@ final class GlobalVoiceShortcutMonitor {
             isSecondPressForDoubleTrigger = false
         }
         longPressWorkItem?.cancel()
+        guard !isSecondPressForDoubleTrigger else { return }
         let workItem = DispatchWorkItem { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self, self.isPressed, !self.didTriggerLongPress else { return }

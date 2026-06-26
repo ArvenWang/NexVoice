@@ -6,12 +6,55 @@
 
 - 当前工作目录：`/Users/nefish/Desktop/Coding/NexVoice`。
 - 项目形态：SwiftPM macOS 菜单栏 App，核心模块为 `NexVoiceCore`，宿主为 `NexVoiceHost`。
-- 默认入口：单击右 Alt 开始普通语音输入，再单击一次结束；双击右 Alt 进入上下文问答（优先选中文字，未选中文字则读取鼠标附近 OCR）；长按右 Alt 约 0.55 秒进入看屏自动回复；ESC 可取消录音、等待 final、AI 改写或看屏回复中的会话。
+- 默认入口：单击右 Alt 开始普通语音输入，再单击一次结束；双击右 Alt 进入上下文问答（优先选中文字，未选中文字则读取鼠标附近 OCR，且会高亮 OCR 覆盖区域）；长按右 Alt 约 0.55 秒进入看屏自动回复；ESC 可取消录音、等待 final、AI 改写或看屏回复中的会话。
 - 当前主链路：腾讯云实时 ASR `16k_zh_en` -> DeepSeek `deepseek-v4-flash` 最终整理 -> 写入当前聚焦输入框。
 - 普通语音输入已增加第一版“基于输入框短草稿连续改写”：录音开始时读取当前输入框草稿，语音结束后把“已有草稿 + 本轮语音”交给 DeepSeek 输出完整新草稿，并在安全条件满足时用非全选的 AX 写入替换当前输入框全文；空输入框、输入框内已有选区、超长草稿仍按光标位置普通插入。
 - 本地 SenseVoice Small 和 WhisperKit large-v3 保留为兜底和质量对照，不是当前默认主链路。
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
+
+## 本轮追加（2026-06-27：统一双击问答流程，并高亮鼠标 OCR 范围）
+
+- 用户确认本轮目标：
+  - 鼠标问答的触发是“双击右 Alt 两次短按”，不是第二下长按。
+  - 划词问答和鼠标问答的交互流程要一致：双击开始录音，显示波形，说完后再按一次结束，然后在划词/鼠标附近显示回答。
+  - 没有划词时，双击触发鼠标 OCR 问答，并且 OCR 覆盖范围必须在屏幕上明确标出来。
+- 本轮修复：
+  - `GlobalVoiceShortcutMonitor` 在识别到双击第二下后不再安排长按定时器，避免“双击第二下稍微按久一点”误触发长按看屏回复。
+  - 鼠标问答不再走旧的看屏回复状态机；现在和划词问答一样先展示波形并开始收音，语音 final 后再用 OCR 上下文生成回答。
+  - 鼠标问答的提示条和最终回答固定锚定在双击时的鼠标位置，不再跟随 OCR 大区域漂移。
+  - OCR 捕获任务改为独立后台任务；它可以和录音并行，减少用户看到的状态跳转。
+  - 新增 `OCRRegionOverlayController`：没有划词时，鼠标 OCR 命中的文字模块会以蓝色半透明边框高亮，默认 8 秒后自动隐藏；取消、失败、切换到其他模式会立即隐藏。
+  - `ScreenReply.jsonl` 增加 `mouseRegionInScreen` 字段；同一个 `captureID` 下可以看到窗口内 OCR 区域、屏幕坐标区域、`visibleText`、`lines`、语音指令和最终回答。
+  - 清理旧的鼠标问答兼容分支，避免鼠标问答和看屏回复继续共用状态导致互相打架。
+- 当前行为：
+  - 单击右 Alt：普通语音输入；再次单击结束并写入当前输入位置。
+  - 双击右 Alt + 有选中文字：基于选中文字问答，波形和回答出现在选区附近，不覆盖文本。
+  - 双击右 Alt + 无选中文字：基于鼠标附近 OCR 文字问答，波形和回答出现在鼠标附近，同时屏幕上高亮 OCR 覆盖范围。
+  - 长按右 Alt：保留原看屏回复链路，仍按输入框看屏回复方式工作。
+- 已验证：
+  - `git diff --check` 通过。
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 通过。
+  - `swift test --disable-sandbox --quiet` 通过，150 个测试。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=4 dist/NexVoice.app` 通过。
+  - `codesign --verify --deep --strict --verbose=4 /Applications/NexVoice.app` 通过。
+  - `plutil -lint dist/NexVoice.app/Contents/Info.plist /Applications/NexVoice.app/Contents/Info.plist` 通过。
+  - `/Applications/NexVoice.app/Contents/Resources/NexVoiceEmbeddedConfig/DeepSeek.json` 和 `TencentCloudASR.json` 存在，未在日志或进展中展示密钥内容。
+  - `hdiutil verify dist/NexVoice-0.1.48-build49-mouse-ocr-highlight-embedded-keys-20260627.dmg` 通过。
+- 已构建并安装新版：
+  - App：`dist/NexVoice.app`
+  - 安装路径：`/Applications/NexVoice.app`
+  - 当前运行 PID：`72762`
+  - 旧版备份：`dist/install-backups/NexVoice-20260627-011409.app`
+  - 新 DMG：`dist/NexVoice-0.1.48-build49-mouse-ocr-highlight-embedded-keys-20260627.dmg`
+- Git：
+  - 本地已提交；当前 `main` 比 `origin/main` 多 5 个提交。
+  - 远端推送仍失败：当前机器无法读取 GitHub HTTPS 用户名，需要用户补 GitHub 凭据后再推送。
+- 需要用户复测：
+  - 没有划词时，把鼠标放到网页/图片/PDF/聊天窗口中一段文字附近，双击右 Alt 后说问题，再单击结束。
+  - 预期：先在鼠标附近出现波形；OCR 命中的文字模块出现蓝色高亮；结束后回答固定显示在鼠标附近，不写入输入框。
+  - 如需排查，查看 `~/Library/Application Support/NexVoice/Logs/ScreenReply.jsonl` 中同一 `captureID` 的 `visibleText`、`mouseRegionInScreen`、`voiceInstruction` 和 `replyPreview`。
 
 ## 本轮追加（2026-06-27：修复双击问答误落回普通输入）
 
