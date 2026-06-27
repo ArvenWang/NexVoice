@@ -8,6 +8,21 @@ struct SelectedTextContext {
     let anchorRect: CGRect
 }
 
+struct SelectedTextQuestionDetection {
+    let context: SelectedTextContext?
+    let source: String
+    let shouldFallbackToMouseContext: Bool
+    let focusedChainCount: Int
+    let searchRootCount: Int
+    let scannedNodeCount: Int
+    let didUseRecursiveScan: Bool
+    let didSeeAXSelectionSignal: Bool
+    let clipboardDurationMs: Double?
+    let clipboardDidChange: Bool?
+    let clipboardTextCharacters: Int?
+    let clipboardRestoreSucceeded: Bool?
+}
+
 enum FocusedTextAccessMethod: String {
     case axValue
     case axStringForRange
@@ -116,8 +131,15 @@ final class FocusedTextInserter {
         return Self.nonEditableSelectedTextContext(in: targetApplication)
     }
 
-    func selectedTextQuestionContext(in targetApplication: NSRunningApplication?) async -> SelectedTextContext? {
-        Self.selectedTextQuestionContext(in: targetApplication)
+    func selectedTextQuestionDetection(in targetApplication: NSRunningApplication?) async -> SelectedTextQuestionDetection {
+        let accessibilityDetection = Self.selectedTextQuestionDetection(in: targetApplication)
+        if accessibilityDetection.context != nil {
+            return accessibilityDetection
+        }
+        return await selectedTextQuestionDetectionUsingClipboardFallback(
+            in: targetApplication,
+            accessibilityDetection: accessibilityDetection
+        )
     }
 
     func rewriteContext(
@@ -211,6 +233,75 @@ final class FocusedTextInserter {
         postCommandKey(9)
     }
 
+    private static func postCommandC() {
+        postCommandKey(8)
+    }
+
+    private func selectedTextQuestionDetectionUsingClipboardFallback(
+        in targetApplication: NSRunningApplication?,
+        accessibilityDetection: SelectedTextQuestionDetection
+    ) async -> SelectedTextQuestionDetection {
+        guard canPostKeyboardEvents else { return accessibilityDetection }
+
+        let startedAt = Date()
+        let snapshot = PasteboardSnapshot(pasteboard: pasteboard)
+        let marker = "__NEXVOICE_SELECTED_TEXT_PROBE__\(UUID().uuidString)__"
+        pasteboard.clearContents()
+        guard pasteboard.setString(marker, forType: .string) else {
+            return accessibilityDetection
+        }
+        let markerChangeCount = pasteboard.changeCount
+
+        targetApplication?.activate(options: [.activateIgnoringOtherApps])
+        Self.postCommandC()
+        try? await Task.sleep(nanoseconds: 160_000_000)
+
+        let copiedText = pasteboard.string(forType: .string)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let didChange = pasteboard.changeCount != markerChangeCount
+        let restoreSucceeded = snapshot.restore(to: pasteboard)
+        let durationMs = Date().timeIntervalSince(startedAt) * 1_000
+
+        if didChange,
+           let copiedText,
+           !copiedText.isEmpty,
+           copiedText != marker {
+            return SelectedTextQuestionDetection(
+                context: SelectedTextContext(
+                    text: copiedText,
+                    anchorRect: CGRect(origin: NSEvent.mouseLocation, size: .zero)
+                ),
+                source: "clipboard_copy",
+                shouldFallbackToMouseContext: false,
+                focusedChainCount: accessibilityDetection.focusedChainCount,
+                searchRootCount: accessibilityDetection.searchRootCount,
+                scannedNodeCount: accessibilityDetection.scannedNodeCount,
+                didUseRecursiveScan: accessibilityDetection.didUseRecursiveScan,
+                didSeeAXSelectionSignal: accessibilityDetection.didSeeAXSelectionSignal,
+                clipboardDurationMs: durationMs,
+                clipboardDidChange: didChange,
+                clipboardTextCharacters: copiedText.count,
+                clipboardRestoreSucceeded: restoreSucceeded
+            )
+        }
+
+        let likelyTextSelectionReadFailure = accessibilityDetection.didSeeAXSelectionSignal && didChange
+        return SelectedTextQuestionDetection(
+            context: nil,
+            source: likelyTextSelectionReadFailure ? "selection_read_failed" : accessibilityDetection.source,
+            shouldFallbackToMouseContext: !likelyTextSelectionReadFailure,
+            focusedChainCount: accessibilityDetection.focusedChainCount,
+            searchRootCount: accessibilityDetection.searchRootCount,
+            scannedNodeCount: accessibilityDetection.scannedNodeCount,
+            didUseRecursiveScan: accessibilityDetection.didUseRecursiveScan,
+            didSeeAXSelectionSignal: accessibilityDetection.didSeeAXSelectionSignal,
+            clipboardDurationMs: durationMs,
+            clipboardDidChange: didChange,
+            clipboardTextCharacters: copiedText?.count,
+            clipboardRestoreSucceeded: restoreSucceeded
+        )
+    }
+
     private static func hasEditableSelectedText(in targetApplication: NSRunningApplication?) -> Bool {
         guard let focusedElement = focusedElement(in: targetApplication) ?? systemFocusedElement() else {
             return false
@@ -234,11 +325,15 @@ final class FocusedTextInserter {
     ) -> SelectedTextContext? {
         let roots = selectionSearchRoots(in: targetApplication)
         var visited = 0
+        var didTimeOut = false
+        var didSeeSelectionSignal = false
         for root in roots {
             if let context = nonEditableSelectedTextContext(
                 from: root,
                 visited: &visited,
-                maxNodes: 700
+                maxNodes: 700,
+                didTimeOut: &didTimeOut,
+                didSeeSelectionSignal: &didSeeSelectionSignal
             ) {
                 return context
             }
@@ -246,18 +341,99 @@ final class FocusedTextInserter {
         return nil
     }
 
-    private static func selectedTextQuestionContext(
+    private static func selectedTextQuestionDetection(
         in targetApplication: NSRunningApplication?
-    ) -> SelectedTextContext? {
+    ) -> SelectedTextQuestionDetection {
+        let startedAt = Date()
+        let recursiveScanTimeoutSeconds: TimeInterval = 0.25
+        var focusedChainCount = 0
+        var didSeeAXSelectionSignal = false
         if let focusedElement = focusedElement(in: targetApplication) ?? systemFocusedElement() {
-            for element in elementAndParents(from: focusedElement, maxDepth: 4) {
+            let chain = elementAndParents(from: focusedElement, maxDepth: 4)
+            focusedChainCount = chain.count
+            for element in chain {
+                if selectedTextLength(on: element) > 0 {
+                    didSeeAXSelectionSignal = true
+                }
                 if let context = selectedTextContext(from: element) {
-                    return context
+                    return SelectedTextQuestionDetection(
+                        context: context,
+                        source: "focused_chain",
+                        shouldFallbackToMouseContext: false,
+                        focusedChainCount: focusedChainCount,
+                        searchRootCount: 0,
+                        scannedNodeCount: 0,
+                        didUseRecursiveScan: false,
+                        didSeeAXSelectionSignal: true,
+                        clipboardDurationMs: nil,
+                        clipboardDidChange: nil,
+                        clipboardTextCharacters: nil,
+                        clipboardRestoreSucceeded: nil
+                    )
                 }
             }
         }
 
-        return nonEditableSelectedTextContext(in: targetApplication)
+        let roots = selectionSearchRoots(in: targetApplication)
+        var visited = 0
+        var didTimeOut = false
+        for root in roots {
+            if let context = nonEditableSelectedTextContext(
+                from: root,
+                visited: &visited,
+                maxNodes: 700,
+                startedAt: startedAt,
+                timeoutSeconds: recursiveScanTimeoutSeconds,
+                didTimeOut: &didTimeOut,
+                didSeeSelectionSignal: &didSeeAXSelectionSignal
+            ) {
+                return SelectedTextQuestionDetection(
+                    context: context,
+                    source: "non_editable_scan",
+                    shouldFallbackToMouseContext: false,
+                    focusedChainCount: focusedChainCount,
+                    searchRootCount: roots.count,
+                    scannedNodeCount: visited,
+                    didUseRecursiveScan: true,
+                    didSeeAXSelectionSignal: true,
+                    clipboardDurationMs: nil,
+                    clipboardDidChange: nil,
+                    clipboardTextCharacters: nil,
+                    clipboardRestoreSucceeded: nil
+                )
+            }
+            if didTimeOut {
+                return SelectedTextQuestionDetection(
+                    context: nil,
+                    source: "timed_out",
+                    shouldFallbackToMouseContext: true,
+                    focusedChainCount: focusedChainCount,
+                    searchRootCount: roots.count,
+                    scannedNodeCount: visited,
+                    didUseRecursiveScan: true,
+                    didSeeAXSelectionSignal: didSeeAXSelectionSignal,
+                    clipboardDurationMs: nil,
+                    clipboardDidChange: nil,
+                    clipboardTextCharacters: nil,
+                    clipboardRestoreSucceeded: nil
+                )
+            }
+        }
+
+        return SelectedTextQuestionDetection(
+            context: nil,
+            source: "not_found",
+            shouldFallbackToMouseContext: true,
+            focusedChainCount: focusedChainCount,
+            searchRootCount: roots.count,
+            scannedNodeCount: visited,
+            didUseRecursiveScan: true,
+            didSeeAXSelectionSignal: didSeeAXSelectionSignal,
+            clipboardDurationMs: nil,
+            clipboardDidChange: nil,
+            clipboardTextCharacters: nil,
+            clipboardRestoreSucceeded: nil
+        )
     }
 
     private static func selectedTextContext(from element: AXUIElement) -> SelectedTextContext? {
@@ -276,10 +452,24 @@ final class FocusedTextInserter {
     private static func nonEditableSelectedTextContext(
         from element: AXUIElement,
         visited: inout Int,
-        maxNodes: Int
+        maxNodes: Int,
+        startedAt: Date? = nil,
+        timeoutSeconds: TimeInterval? = nil,
+        didTimeOut: inout Bool,
+        didSeeSelectionSignal: inout Bool
     ) -> SelectedTextContext? {
         guard visited < maxNodes else { return nil }
+        if let startedAt,
+           let timeoutSeconds,
+           Date().timeIntervalSince(startedAt) >= timeoutSeconds {
+            didTimeOut = true
+            return nil
+        }
         visited += 1
+
+        if selectedTextLength(on: element) > 0 {
+            didSeeSelectionSignal = true
+        }
 
         if !isEditableTextElement(element),
            !isDraftWritableElement(element),
@@ -297,10 +487,15 @@ final class FocusedTextInserter {
             if let context = nonEditableSelectedTextContext(
                 from: child,
                 visited: &visited,
-                maxNodes: maxNodes
+                maxNodes: maxNodes,
+                startedAt: startedAt,
+                timeoutSeconds: timeoutSeconds,
+                didTimeOut: &didTimeOut,
+                didSeeSelectionSignal: &didSeeSelectionSignal
             ) {
                 return context
             }
+            if didTimeOut { return nil }
         }
         return nil
     }
@@ -871,9 +1066,10 @@ private struct PasteboardSnapshot {
         } ?? []
     }
 
-    func restore(to pasteboard: NSPasteboard) {
+    @discardableResult
+    func restore(to pasteboard: NSPasteboard) -> Bool {
         pasteboard.clearContents()
-        guard !items.isEmpty else { return }
-        pasteboard.writeObjects(items)
+        guard !items.isEmpty else { return true }
+        return pasteboard.writeObjects(items)
     }
 }

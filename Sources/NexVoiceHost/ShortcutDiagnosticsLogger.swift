@@ -68,6 +68,20 @@ struct ShortcutDiagnosticEvent: Encodable {
     let appName: String?
     let bundleIdentifier: String?
     let mouseLocation: ShortcutDiagnosticPoint?
+    let selectedTextDetectionDurationMs: Double?
+    let selectedTextDetectionSource: String?
+    let selectedTextDetectionFound: Bool?
+    let selectedTextCharacters: Int?
+    let selectedTextFocusedChainCount: Int?
+    let selectedTextSearchRootCount: Int?
+    let selectedTextScannedNodeCount: Int?
+    let selectedTextDidUseRecursiveScan: Bool?
+    let selectedTextDidSeeAXSelectionSignal: Bool?
+    let selectedTextShouldFallbackToMouseContext: Bool?
+    let selectedTextClipboardDurationMs: Double?
+    let selectedTextClipboardDidChange: Bool?
+    let selectedTextClipboardTextCharacters: Int?
+    let selectedTextClipboardRestoreSucceeded: Bool?
     let usesRegisteredHotKey: Bool?
     let allowsEventMonitorFallback: Bool?
     let usesLowLevelKeyboardTapFallback: Bool?
@@ -97,6 +111,20 @@ struct ShortcutDiagnosticEvent: Encodable {
         appName: String? = nil,
         bundleIdentifier: String? = nil,
         mouseLocation: CGPoint? = nil,
+        selectedTextDetectionDurationMs: Double? = nil,
+        selectedTextDetectionSource: String? = nil,
+        selectedTextDetectionFound: Bool? = nil,
+        selectedTextCharacters: Int? = nil,
+        selectedTextFocusedChainCount: Int? = nil,
+        selectedTextSearchRootCount: Int? = nil,
+        selectedTextScannedNodeCount: Int? = nil,
+        selectedTextDidUseRecursiveScan: Bool? = nil,
+        selectedTextDidSeeAXSelectionSignal: Bool? = nil,
+        selectedTextShouldFallbackToMouseContext: Bool? = nil,
+        selectedTextClipboardDurationMs: Double? = nil,
+        selectedTextClipboardDidChange: Bool? = nil,
+        selectedTextClipboardTextCharacters: Int? = nil,
+        selectedTextClipboardRestoreSucceeded: Bool? = nil,
         usesRegisteredHotKey: Bool? = nil,
         allowsEventMonitorFallback: Bool? = nil,
         usesLowLevelKeyboardTapFallback: Bool? = nil,
@@ -126,6 +154,20 @@ struct ShortcutDiagnosticEvent: Encodable {
         self.appName = appName
         self.bundleIdentifier = bundleIdentifier
         self.mouseLocation = mouseLocation.map(ShortcutDiagnosticPoint.init)
+        self.selectedTextDetectionDurationMs = selectedTextDetectionDurationMs
+        self.selectedTextDetectionSource = selectedTextDetectionSource
+        self.selectedTextDetectionFound = selectedTextDetectionFound
+        self.selectedTextCharacters = selectedTextCharacters
+        self.selectedTextFocusedChainCount = selectedTextFocusedChainCount
+        self.selectedTextSearchRootCount = selectedTextSearchRootCount
+        self.selectedTextScannedNodeCount = selectedTextScannedNodeCount
+        self.selectedTextDidUseRecursiveScan = selectedTextDidUseRecursiveScan
+        self.selectedTextDidSeeAXSelectionSignal = selectedTextDidSeeAXSelectionSignal
+        self.selectedTextShouldFallbackToMouseContext = selectedTextShouldFallbackToMouseContext
+        self.selectedTextClipboardDurationMs = selectedTextClipboardDurationMs
+        self.selectedTextClipboardDidChange = selectedTextClipboardDidChange
+        self.selectedTextClipboardTextCharacters = selectedTextClipboardTextCharacters
+        self.selectedTextClipboardRestoreSucceeded = selectedTextClipboardRestoreSucceeded
         self.usesRegisteredHotKey = usesRegisteredHotKey
         self.allowsEventMonitorFallback = allowsEventMonitorFallback
         self.usesLowLevelKeyboardTapFallback = usesLowLevelKeyboardTapFallback

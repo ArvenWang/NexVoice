@@ -286,13 +286,32 @@ import Testing
         style: .standard
     )
 
-    #expect(prompt.contains("用户选中的文本"))
+    #expect(prompt.contains("选中文本"))
     #expect(prompt.contains("用户语音指令"))
     #expect(prompt.contains("NexVoice should feel instant."))
     #expect(prompt.contains("翻译"))
     #expect(prompt.contains("当前输出语言"))
+    #expect(prompt.contains("如果上下文本身已经是当前输出语言，译成另一种最自然的语言"))
     #expect(prompt.contains("标准模式"))
-    #expect(prompt.contains("只输出最终结果"))
+    #expect(prompt.contains("用户语音指令就是要执行的事情"))
+}
+
+@Test func contextQuestionPromptPlansUseSharedQuestionSystemPrompt() {
+    let selectedPlan = VoiceRewritePromptPolicy.selectedTextCommandPromptPlan(
+        selectedText: "NexVoice should feel instant.",
+        instruction: "翻译",
+        outputLanguage: .simplifiedChinese
+    )
+    let mousePlan = VoiceRewritePromptPolicy.mouseContextCommandPromptPlan(
+        capturedText: "NexVoice should feel instant.",
+        instruction: "翻译",
+        outputLanguage: .simplifiedChinese
+    )
+
+    #expect(selectedPlan.systemPrompt == VoiceRewritePromptPolicy.contextQuestionSystemPrompt)
+    #expect(mousePlan.systemPrompt == VoiceRewritePromptPolicy.contextQuestionSystemPrompt)
+    #expect(selectedPlan.systemPrompt == mousePlan.systemPrompt)
+    #expect(selectedPlan.systemPrompt.contains("语音指令就是要执行的事情"))
 }
 
 @Test func screenReplyPromptUsesVisibleContextAndCurrentStyle() {
@@ -340,10 +359,13 @@ import Testing
         context: VoiceRewriteContext(sourceApplicationName: "Safari")
     )
 
-    #expect(prompt.contains("鼠标位置问答模式"))
-    #expect(prompt.contains("用户鼠标附近 OCR 识别出的文字块"))
-    #expect(prompt.contains("只基于这块可见文字回答用户语音问题"))
-    #expect(prompt.contains("不够判断"))
+    #expect(prompt.contains("鼠标问答"))
+    #expect(prompt.contains("鼠标附近 OCR 文字"))
+    #expect(prompt.contains("用户语音指令就是要执行的事情"))
+    #expect(prompt.contains("直接执行语音指令"))
+    #expect(prompt.contains("不要把语音指令或上下文复述成答案"))
+    #expect(prompt.contains("直接输出翻译结果"))
+    #expect(prompt.contains("信息不足时说明不足"))
     #expect(prompt.contains("这个价格合理吗？"))
     #expect(prompt.contains("$20 per month"))
     #expect(prompt.contains("Safari"))

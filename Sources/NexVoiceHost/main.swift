@@ -481,7 +481,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        if let selectedTextContext = await textInserter.selectedTextQuestionContext(in: targetApplication) {
+        let mouseContextPrewarmTask = startMouseContextCapturePrewarm(
+            mouseLocation: shortcutAnchorRect.origin,
+            targetApplication: targetApplication
+        )
+        if mouseContextPrewarmTask != nil {
+            await Task.yield()
+        }
+        let selectedTextDetectionStartedAt = Date()
+        let selectedTextDetection = await textInserter.selectedTextQuestionDetection(in: targetApplication)
+        let selectedTextDetectionDurationMs = Date().timeIntervalSince(selectedTextDetectionStartedAt) * 1_000
+        let selectedTextContext = selectedTextDetection.context
+        logShortcutRoute(
+            event: "selected_text_detection_finished",
+            routeAction: "beginContextQuestion",
+            selectedTextDetectionDurationMs: selectedTextDetectionDurationMs,
+            selectedTextDetectionSource: selectedTextDetection.source,
+            selectedTextDetectionFound: selectedTextContext != nil,
+            selectedTextCharacters: selectedTextContext?.text.count,
+            selectedTextFocusedChainCount: selectedTextDetection.focusedChainCount,
+            selectedTextSearchRootCount: selectedTextDetection.searchRootCount,
+            selectedTextScannedNodeCount: selectedTextDetection.scannedNodeCount,
+            selectedTextDidUseRecursiveScan: selectedTextDetection.didUseRecursiveScan,
+            selectedTextDidSeeAXSelectionSignal: selectedTextDetection.didSeeAXSelectionSignal,
+            selectedTextShouldFallbackToMouseContext: selectedTextDetection.shouldFallbackToMouseContext,
+            selectedTextClipboardDurationMs: selectedTextDetection.clipboardDurationMs,
+            selectedTextClipboardDidChange: selectedTextDetection.clipboardDidChange,
+            selectedTextClipboardTextCharacters: selectedTextDetection.clipboardTextCharacters,
+            selectedTextClipboardRestoreSucceeded: selectedTextDetection.clipboardRestoreSucceeded
+        )
+
+        if let selectedTextContext {
+            mouseContextPrewarmTask?.cancel()
             logShortcutRoute(
                 event: "begin_context_question_selected_text",
                 routeAction: "beginContextQuestion",
@@ -496,13 +527,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        guard selectedTextDetection.shouldFallbackToMouseContext else {
+            mouseContextPrewarmTask?.cancel()
+            logShortcutRoute(
+                event: "selected_text_read_failed",
+                routeAction: "beginContextQuestion",
+                interactionMode: ContextCaptureInteractionMode.selectedTextQuestion.rawValue,
+                selectedTextDetectionDurationMs: selectedTextDetectionDurationMs,
+                selectedTextDetectionSource: selectedTextDetection.source,
+                selectedTextDetectionFound: false,
+                selectedTextFocusedChainCount: selectedTextDetection.focusedChainCount,
+                selectedTextSearchRootCount: selectedTextDetection.searchRootCount,
+                selectedTextScannedNodeCount: selectedTextDetection.scannedNodeCount,
+                selectedTextDidUseRecursiveScan: selectedTextDetection.didUseRecursiveScan,
+                selectedTextDidSeeAXSelectionSignal: selectedTextDetection.didSeeAXSelectionSignal,
+                selectedTextShouldFallbackToMouseContext: selectedTextDetection.shouldFallbackToMouseContext,
+                selectedTextClipboardDurationMs: selectedTextDetection.clipboardDurationMs,
+                selectedTextClipboardDidChange: selectedTextDetection.clipboardDidChange,
+                selectedTextClipboardTextCharacters: selectedTextDetection.clipboardTextCharacters,
+                selectedTextClipboardRestoreSucceeded: selectedTextDetection.clipboardRestoreSucceeded,
+                errorMessage: "selected_text_read_failed"
+            )
+            captionPanel.showStatus("未能读取选中文字", isError: true, autoHideDelay: 1.4)
+            beginSessionTask = nil
+            return
+        }
+
         beginSessionTask = nil
         logShortcutRoute(
             event: "begin_context_question_mouse",
             routeAction: "beginContextQuestion",
             interactionMode: ContextCaptureInteractionMode.mouseContextQuestion.rawValue
         )
-        beginMouseContextQuestion(anchorRect: shortcutAnchorRect)
+        beginMouseContextQuestion(
+            anchorRect: shortcutAnchorRect,
+            prewarmedCaptureTask: mouseContextPrewarmTask
+        )
     }
 
     private func beginSelectedTextQuestion(
@@ -729,7 +789,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func beginMouseContextQuestion(anchorRect: CGRect? = nil) {
+    private func startMouseContextCapturePrewarm(
+        mouseLocation: CGPoint,
+        targetApplication: NSRunningApplication?
+    ) -> Task<ScreenReplyCapturedContext, Error>? {
+        guard SystemPermissionRequester.hasScreenRecordingPermission else { return nil }
+        logShortcutRoute(
+            event: "mouse_context_prewarm_started",
+            routeAction: "beginContextQuestion",
+            interactionMode: ContextCaptureInteractionMode.mouseContextQuestion.rawValue
+        )
+
+        return Task { [weak self, targetApplication, mouseLocation] in
+            guard let self else { throw CancellationError() }
+            return try await self.mouseContextCaptureService.capture(
+                mouseScreenLocation: mouseLocation,
+                appName: targetApplication?.localizedName,
+                bundleIdentifier: targetApplication?.bundleIdentifier,
+                excludingWindowNumber: nil,
+                interactionMode: "mouse_context_prewarm",
+                successEventName: "mouse_visual_prewarmed",
+                contextSource: "screen_region_ocr_prewarm"
+            )
+        }
+    }
+
+    private func logAdoptedMouseContextPrewarm(_ capturedContext: ScreenReplyCapturedContext) async {
+        await ScreenReplyDiagnosticsLogger.shared.log(
+            ScreenReplyDiagnosticEvent(
+                captureID: capturedContext.captureID,
+                event: "mouse_visual_prewarm_adopted",
+                interactionMode: ContextCaptureInteractionMode.mouseContextQuestion.rawValue,
+                captureMode: capturedContext.captureMode,
+                appName: capturedContext.appName,
+                bundleIdentifier: capturedContext.bundleIdentifier,
+                windowTitle: capturedContext.windowTitle,
+                inputFrame: capturedContext.inputFrameInWindow,
+                replyRegion: capturedContext.replyRegionInWindow,
+                mouseLocation: capturedContext.mouseLocationInWindow,
+                mouseRegion: capturedContext.mouseRegionInWindow,
+                mouseRegionInScreen: capturedContext.mouseRegionInScreen,
+                lineCount: capturedContext.lineCount,
+                visibleText: capturedContext.visibleText,
+                structuredMessages: capturedContext.structuredMessages,
+                lines: capturedContext.lines,
+                contextSource: "screen_region_ocr_prewarm"
+            )
+        )
+    }
+
+    private func beginMouseContextQuestion(
+        anchorRect: CGRect? = nil,
+        prewarmedCaptureTask: Task<ScreenReplyCapturedContext, Error>? = nil
+    ) {
         logShortcutRoute(
             event: "begin_mouse_context_question_requested",
             routeAction: "beginContextQuestion",
@@ -815,17 +927,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let overlayWindowNumber = ocrRegionOverlay.windowNumber
-        contextCaptureTask = Task { [weak self, targetApplication, mouseLocation, overlayWindowNumber] in
+        contextCaptureTask = Task { [weak self, targetApplication, mouseLocation, overlayWindowNumber, prewarmedCaptureTask] in
             guard let self else { return }
             let capturedContext: ScreenReplyCapturedContext
             do {
-                capturedContext = try await self.mouseContextCaptureService.capture(
-                    mouseScreenLocation: mouseLocation,
-                    appName: targetApplication?.localizedName,
-                    bundleIdentifier: targetApplication?.bundleIdentifier,
-                    excludingWindowNumber: overlayWindowNumber,
-                    interactionMode: self.contextCaptureInteractionModeForCurrentSession?.rawValue
-                )
+                if let prewarmedCaptureTask {
+                    capturedContext = try await prewarmedCaptureTask.value
+                    await self.logAdoptedMouseContextPrewarm(capturedContext)
+                } else {
+                    capturedContext = try await self.mouseContextCaptureService.capture(
+                        mouseScreenLocation: mouseLocation,
+                        appName: targetApplication?.localizedName,
+                        bundleIdentifier: targetApplication?.bundleIdentifier,
+                        excludingWindowNumber: overlayWindowNumber,
+                        interactionMode: self.contextCaptureInteractionModeForCurrentSession?.rawValue
+                    )
+                }
                 guard capturedContext.captureMode == .mouseRegion else {
                     throw ScreenReplyCaptureError.noMouseRegionText
                 }
@@ -2117,6 +2234,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         triggerKind: String? = nil,
         routeAction: String? = nil,
         interactionMode: String? = nil,
+        selectedTextDetectionDurationMs: Double? = nil,
+        selectedTextDetectionSource: String? = nil,
+        selectedTextDetectionFound: Bool? = nil,
+        selectedTextCharacters: Int? = nil,
+        selectedTextFocusedChainCount: Int? = nil,
+        selectedTextSearchRootCount: Int? = nil,
+        selectedTextScannedNodeCount: Int? = nil,
+        selectedTextDidUseRecursiveScan: Bool? = nil,
+        selectedTextDidSeeAXSelectionSignal: Bool? = nil,
+        selectedTextShouldFallbackToMouseContext: Bool? = nil,
+        selectedTextClipboardDurationMs: Double? = nil,
+        selectedTextClipboardDidChange: Bool? = nil,
+        selectedTextClipboardTextCharacters: Int? = nil,
+        selectedTextClipboardRestoreSucceeded: Bool? = nil,
         errorMessage: String? = nil
     ) {
         let application = targetApplicationForCurrentSession ?? NSWorkspace.shared.frontmostApplication
@@ -2132,6 +2263,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     appName: application?.localizedName,
                     bundleIdentifier: application?.bundleIdentifier,
                     mouseLocation: NSEvent.mouseLocation,
+                    selectedTextDetectionDurationMs: selectedTextDetectionDurationMs,
+                    selectedTextDetectionSource: selectedTextDetectionSource,
+                    selectedTextDetectionFound: selectedTextDetectionFound,
+                    selectedTextCharacters: selectedTextCharacters,
+                    selectedTextFocusedChainCount: selectedTextFocusedChainCount,
+                    selectedTextSearchRootCount: selectedTextSearchRootCount,
+                    selectedTextScannedNodeCount: selectedTextScannedNodeCount,
+                    selectedTextDidUseRecursiveScan: selectedTextDidUseRecursiveScan,
+                    selectedTextDidSeeAXSelectionSignal: selectedTextDidSeeAXSelectionSignal,
+                    selectedTextShouldFallbackToMouseContext: selectedTextShouldFallbackToMouseContext,
+                    selectedTextClipboardDurationMs: selectedTextClipboardDurationMs,
+                    selectedTextClipboardDidChange: selectedTextClipboardDidChange,
+                    selectedTextClipboardTextCharacters: selectedTextClipboardTextCharacters,
+                    selectedTextClipboardRestoreSucceeded: selectedTextClipboardRestoreSucceeded,
                     errorMessage: errorMessage
                 )
             )

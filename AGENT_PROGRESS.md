@@ -13,6 +13,86 @@
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
+## 本轮追加（2026-06-27：上下文问答提示词收敛与鼠标 OCR 预热）
+
+- 用户反馈：
+  - 划词问答成功率已经较高。
+  - 鼠标问答成功率可以，但速度体感偏慢。
+  - 鼠标问答里说“翻译一下这段/这句”时，模型有时没有输出翻译，而是返回英文原文或整理后的英文。
+- 日志定位：
+  - 最近鼠标问答样本中，双击后先花约 `404ms / 408ms / 433ms` 做划词检测，然后才进入鼠标 OCR。
+  - OCR 本身耗时约 `846ms / 609ms / 215ms`，DeepSeek 生成耗时约 `1068ms - 1744ms`。
+  - `ScreenReply.jsonl` 显示 OCR 已拿到英文上下文；`DeepSeekRewrite.jsonl` 显示用户指令为“翻译一下这段/这句”，但输出仍是英文，说明主要问题不是 OCR 失败，而是鼠标问答提示词仍容易被普通“语音整理”语义带偏。
+- 本轮修复：
+  - `DeepSeekFinalRewriteConfiguration` 新增 `contextQuestionSystemPrompt`，划词问答和鼠标问答共用同一套上下文问答系统提示词，不再复用普通语音输入整理器的系统提示词。
+  - 划词问答与鼠标问答收敛到同一个 `contextQuestionCommandPrompt` 模板，只区分上下文来源标签（`选中文本` / `鼠标附近 OCR 文字`）。
+  - 新提示词保持简单规则：语音指令就是要执行的事情；翻译、解释、总结、判断、提取、改写或回答都直接执行；上下文只作为材料；信息不足时说明不足。
+  - 翻译规则补齐：未指定目标语言时译成当前输出语言；如果上下文本身已经是当前输出语言，则译成另一种最自然的语言，避免英文 OCR 被“整理成英文”。
+  - 双击上下文问答启动时新增鼠标 OCR 预热：在划词检测同时后台启动 OCR，但不展示 OCR 框；若最终命中划词，取消/丢弃预热；若确认无划词，采用预热结果并展示 OCR 框。
+  - `MouseContextCaptureService.capture(...)` 支持自定义成功日志事件和 contextSource；预热成功记为 `mouse_visual_prewarmed`，真正被鼠标问答采用时补记 `mouse_visual_prewarm_adopted`，避免日志混淆。
+  - OCR capture 增加取消检查，划词命中后尽量避免预热任务继续写入误导性日志。
+- 已验证：
+  - 用户复测后日志确认：鼠标问答多次出现 `mouse_visual_prewarmed` -> `mouse_visual_prewarm_adopted`，说明预热 OCR 已被实际采用。
+  - 用户复测后日志确认：多次“翻译一下/翻译一下这句话”已输出中文翻译，不再复现英文原文直接返回的问题。
+  - 用户复测后日志中看到一条语音指令为“没有劲儿了，现在没有劲儿了，没有力气了。”，模型按语音内容直接回答；判断为输入指令本身不清晰，不是 OCR、路由或提示词机制错误。
+  - 自检已清理旧的 `selectedTextQuestionContext` 冗余入口，划词问答统一只走带诊断结果的 `selectedTextQuestionDetection`。
+  - `swift test --filter DeepSeekFinalRewriteConfigurationTests` 通过，27 个测试。
+  - `swift test` 通过，152 个测试。
+  - `git diff --check` 通过。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `/Applications/NexVoice.app` 签名验证通过。
+  - `/Applications/NexVoice.app/Contents/Info.plist` 校验通过。
+  - 嵌入配置 `DeepSeek.json` 和 `TencentCloudASR.json` 存在且非空，未展示密钥内容。
+- 已安装：
+  - 安装路径：`/Applications/NexVoice.app`
+  - 当前运行 PID：`88007`
+  - 版本：`0.1.55 (56)`
+  - 旧版备份：`dist/install-backups/NexVoice-20260627-132243-pre-context-prewarm.app`
+- 本轮未做：
+  - 未构建 DMG。
+  - 未提交或推送 Git。
+- 下一步复测重点：
+  - 鼠标问答双击后，OCR 框是否比之前更快出现。
+  - 英文段落上说“翻译一下这段/这句”时，是否稳定输出中文翻译。
+  - 若仍慢，优先看 `Shortcut.jsonl` 的 `selected_text_detection_finished` 与 `ScreenReply.jsonl` 的 `mouse_visual_prewarmed` / `mouse_visual_prewarm_adopted` 时间差。
+
+## 本轮追加（2026-06-27：划词检测耗时日志与鼠标问答通用指令遵循）
+
+- 用户要求：
+  - 先不要武断给划词检测加超时，必须先知道常规耗时范围，避免误伤其他软件或复杂页面。
+  - 鼠标问答不只服务翻译，需要通用 prompt，让大模型把用户语音当作任务执行。
+  - 后续复测发现：划词后双击仍进入鼠标 OCR，出现 OCR 框，最终回答使用 OCR 内容而不是选中文字。
+  - 调研并确认：如果要接近 99% 划词成功率，纯 AX 不够；需要采用成熟开源方案常见的“AX 优先 + 受控剪贴板兜底”。
+- 日志定位：
+  - `Shortcut.jsonl` 显示用户复测时确实走了 `begin_context_question_mouse`。
+  - `ScreenReply.jsonl` 后续事件为 `mouse_context_question`，上下文来源是 `mouse_ocr`，说明最终生成确实使用 OCR 内容。
+  - 当时安装版还没有 `selected_text_detection_finished` 新日志，因此只能确认“走了 OCR”，无法从旧日志拆出划词检测失败路径。
+  - 新日志里 5 次划词检测样本：Chrome 一次 `focused_chain` 真 AX 命中，耗时约 `3.5ms`；Codex / 企业微信 / 微信共 4 次命中的是临时 `clipboard_copy` 兜底，其中企业微信前置 AX 扫描 700 个节点后总耗时约 `6444ms`。
+  - 结论：微信、企业微信、Codex 这类 App 的可见选区经常不通过 AX 暴露；如果不使用剪贴板读取，双击划词问答会漏到鼠标 OCR。
+- 本轮修复：
+  - `FocusedTextInserter` 新增划词问答检测结果，区分快路径 `focused_chain` 和递归窗口扫描 `non_editable_scan` / `not_found`。
+  - `Shortcut.jsonl` 新增 `selected_text_detection_finished` 事件，记录划词检测耗时、是否命中、命中路径、选中文字数、焦点链节点数、搜索根数量、扫描节点数、是否使用递归扫描；超时时 `selectedTextDetectionSource` 为 `timed_out`。
+  - 双击上下文问答仍保持原路由：先检测 AX 划词，未命中才进入鼠标 OCR 问答；本轮没有改变 OCR 区域策略。
+  - 鼠标问答 prompt 改为通用“执行任务”规则：OCR 文字是上下文，用户语音是任务；要求模型执行翻译、解释、总结、判断、对比、提取、改写等动作，不得把语音指令复述成答案。
+  - 对“翻译一下：原文”这种半执行结果增加明确禁止规则，但翻译只是通用任务规则中的一类，不做单一功能特判。
+  - 选区读取器采用“AX 优先 + 受控剪贴板兜底”：AX 先尝试 `focused_chain` 和 `non_editable_scan`；AX 失败后临时写入唯一 marker、模拟 `Cmd+C`、读取文本、立即恢复完整剪贴板。
+  - AX 递归窗口扫描保留 `250ms` 超时限制；正常 `focused_chain` 命中不受影响，复杂/临时窗口不会再拖到多秒。
+  - 新路由保护：读到选区就进入划词问答；确认无选区才进入鼠标 OCR；若 AX 暗示有文字选区但剪贴板读取失败，会显示“未能读取选中文字”，不会漏到鼠标 OCR。
+  - `Shortcut.jsonl` 增加受控剪贴板诊断字段：是否触发剪贴板变化、剪贴板读取耗时、读到文本长度、是否恢复成功、是否允许回落到鼠标 OCR。
+- 已验证：
+  - `swift test` 通过，151 个测试。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `/Applications/NexVoice.app` 签名验证通过。
+  - `/Applications/NexVoice.app/Contents/Info.plist` 通过。
+  - 嵌入配置 `DeepSeek.json` 和 `TencentCloudASR.json` 存在且非空，未展示密钥内容。
+- 已安装：
+  - 安装路径：`/Applications/NexVoice.app`
+  - 当前运行 PID：`70540`
+  - 旧版备份：`dist/install-backups/NexVoice-20260627-114009-pre-selection-resolver.app`
+- 本轮未做：
+  - 未构建 DMG。
+  - 未提交或推送 Git。
+
 ## 本轮追加（2026-06-27：快捷键延迟诊断日志）
 
 - 用户反馈：

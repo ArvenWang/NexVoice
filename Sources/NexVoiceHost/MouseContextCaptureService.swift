@@ -36,7 +36,9 @@ final class MouseContextCaptureService {
         appName: String?,
         bundleIdentifier: String?,
         excludingWindowNumber: Int? = nil,
-        interactionMode: String? = nil
+        interactionMode: String? = nil,
+        successEventName: String = "mouse_visual_captured",
+        contextSource: String = "screen_region_ocr"
     ) async throws -> ScreenReplyCapturedContext {
         guard SystemPermissionRequester.hasScreenRecordingPermission else {
             throw ScreenReplyCaptureError.screenRecordingPermissionRequired
@@ -62,6 +64,7 @@ final class MouseContextCaptureService {
         var totalOCRDurationMs: Double = 0
 
         for attempt in attempts {
+            try Task.checkCancellation()
             let captureStartedAt = Date()
             guard let image = Self.captureScreenRegion(
                 attempt.region,
@@ -74,6 +77,7 @@ final class MouseContextCaptureService {
                 in: image,
                 screenRegion: attempt.region
             )
+            try Task.checkCancellation()
             totalCaptureDurationMs += captureDurationMs
             totalOCRDurationMs += ocrResult.durationMs
             lastRecognizedLines = ocrResult.lines
@@ -105,7 +109,7 @@ final class MouseContextCaptureService {
             await ScreenReplyDiagnosticsLogger.shared.log(
                 ScreenReplyDiagnosticEvent(
                     captureID: captureID,
-                    event: "mouse_visual_captured",
+                    event: successEventName,
                     interactionMode: interactionMode,
                     captureMode: .mouseRegion,
                     appName: appName,
@@ -123,7 +127,7 @@ final class MouseContextCaptureService {
                     visibleText: visibleText,
                     structuredMessages: structuredMessages,
                     lines: capturedLines,
-                    contextSource: "screen_region_ocr"
+                    contextSource: contextSource
                 )
             )
 
@@ -147,6 +151,7 @@ final class MouseContextCaptureService {
         }
 
         if let lastCaptureRegion {
+            try Task.checkCancellation()
             let capturedLines = Self.capturedLines(from: lastRecognizedLines, includedLineIDs: [])
             let visibleText = capturedLines.map(\.text).joined(separator: "\n")
             await ScreenReplyDiagnosticsLogger.shared.log(
@@ -167,7 +172,7 @@ final class MouseContextCaptureService {
                     lineCount: lastRecognizedLines.count,
                     visibleText: visibleText,
                     lines: capturedLines,
-                    contextSource: "screen_region_ocr"
+                    contextSource: contextSource
                 )
             )
         }
