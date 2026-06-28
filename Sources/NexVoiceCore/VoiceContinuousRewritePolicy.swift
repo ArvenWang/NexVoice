@@ -62,6 +62,13 @@ public enum VoiceContinuousRewritePolicy {
             )
         }
 
+        guard !containsProtectedLiteralContent(draft) else {
+            return VoiceContinuousRewriteDecision(
+                rewriteSource: transcript,
+                insertionMode: .insertAtCursor
+            )
+        }
+
         return VoiceContinuousRewriteDecision(
             rewriteSource: """
             连续改写输入：
@@ -75,5 +82,21 @@ public enum VoiceContinuousRewritePolicy {
             insertionMode: .replaceFocusedDraft,
             focusedDraft: draft
         )
+    }
+
+    private static func containsProtectedLiteralContent(_ text: String) -> Bool {
+        let patterns = [
+            #"```"#,
+            #"<\/?[A-Za-z][A-Za-z0-9:_-]*(?:\s+[^<>]*)?>"#,
+            #"https?:\/\/\S+"#,
+            #"app:\/\/\S+"#,
+            #"\b[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\b"#,
+            #"\b[A-Za-z]{2,}_[A-Za-z0-9_-]{12,}\b"#,
+            #"(?m)^\s*::[A-Za-z][A-Za-z0-9_-]*\{"#
+        ]
+
+        return patterns.contains { pattern in
+            text.range(of: pattern, options: .regularExpression) != nil
+        }
     }
 }

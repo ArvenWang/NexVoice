@@ -62,6 +62,30 @@ import Testing
     #expect(decision.rewriteSource == "再补充一个点。")
 }
 
+@Test func continuousRewriteDoesNotRewriteProtectedLiteralDrafts() {
+    let protectedDrafts = [
+        "huangserva/3DCellForge",
+        "tsk_PuPKjOxYZg8NABsNedz4I_cKSLbQAKJBJcYRGs0WqFZ",
+        "<INSTRUCTIONS>\n请保留这段规则。\n</INSTRUCTIONS>",
+        "<div class=\"hero\">Asian Elephant</div>",
+        "::git-create-pr{cwd=\"/repo\" branch=\"main\"}",
+        "https://example.com/docs",
+        "```html\n<section>Demo</section>\n```"
+    ]
+
+    for draft in protectedDrafts {
+        let decision = VoiceContinuousRewritePolicy.decision(
+            focusedDraft: draft,
+            newTranscript: "你再补充一句说明。",
+            hasEditableSelection: false
+        )
+
+        #expect(decision.insertionMode == .insertAtCursor)
+        #expect(decision.rewriteSource == "你再补充一句说明。")
+        #expect(decision.focusedDraft == nil)
+    }
+}
+
 @Test func continuousRewritePromptInstructsModelToReturnWholeDraft() {
     let decision = VoiceContinuousRewritePolicy.decision(
         focusedDraft: "我希望这个功能基于输入框已有内容改写。",

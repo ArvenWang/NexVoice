@@ -13,6 +13,27 @@
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
+## 本轮追加（2026-06-28：Codex 连续改写保护 HTML / 指令 / 代码类字面内容）
+
+- 日志定位：
+  - `ContinuousRewrite.jsonl` 显示一次明确写入失败：`2026-06-27T15:53:29Z`，Codex 输入框进入 `replaceFocusedDraft`，但写回时报 `当前输入框不支持安全替换已有草稿。`；这不是 ASR 或 DeepSeek 失败，而是 AX 替换写入失败。
+  - 最近 Codex 样本中，输入框已有 `huangserva/3DCellForge` 后继续语音补充时，系统会把“已有草稿 + 新语音”交给 DeepSeek 做整体连续改写；仓库名本次保住了，但这种机制会让 HTML、任务 ID、指令块、代码块等字面内容暴露给模型重排或改写。
+  - 当前 prompt 对“英文术语、代码、品牌名”有保护，但没有足够明确要求 URL、仓库名、任务 ID、HTML/XML 标签、`::directive` 原样保留。
+- 本轮修复：
+  - `VoiceContinuousRewritePolicy` 增加保护规则：如果当前输入框草稿包含 Markdown 代码块、HTML/XML 标签、URL、`app://` 链接、仓库名形式 `owner/repo`、长任务 ID、或 `::directive{...}`，不再走 `replaceFocusedDraft` 整体连续改写，改为只整理并插入本轮语音。
+  - `VoiceRewritePromptPolicy` 加强提示词：代码、URL、仓库名、任务 ID、HTML/XML 标签、`::directive` 必须原样保留，不改大小写、符号或结构。
+  - 补充测试覆盖 `huangserva/3DCellForge`、`tsk_...`、`<INSTRUCTIONS>`、HTML、`::git-create-pr{...}`、URL 和 fenced code block。
+- 已验证：
+  - `swift test --filter VoiceContinuousRewritePolicyTests` 通过，7 个测试。
+  - `swift test --filter DeepSeekFinalRewriteConfigurationTests` 通过，27 个测试。
+  - `swift test --disable-sandbox --quiet` 通过，153 个测试。
+  - `git diff --check` 通过。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - 已安装新版到 `/Applications/NexVoice.app`，旧版备份：`dist/install-backups/NexVoice-20260628-125147-pre-protected-literals.app`。
+  - `/Applications/NexVoice.app` 签名、Info.plist 和嵌入配置检查通过；当前版本 `0.1.56 (57)`，运行 PID `35225`。
+- 待复测：
+  - 在 Codex 输入框先放入 `owner/repo`、HTML 片段、`::git-create-pr{...}` 或任务 ID，再用语音追加一句；预期不再整体替换已有草稿，只在光标处插入本轮语音整理结果。
+
 ## 本轮追加（2026-06-27：上下文问答提示词收敛与鼠标 OCR 预热）
 
 - 用户反馈：

@@ -229,12 +229,12 @@ public enum VoiceRewritePromptPolicy {
         let languageInstruction: String
         switch outputLanguage {
         case .simplifiedChinese:
-            languageInstruction = "简体中文为主；英文术语、代码、品牌名、产品名和自然中英混合可以保留。"
+            languageInstruction = "简体中文为主；英文术语、代码、URL、仓库名、任务 ID、HTML/XML 标签、::directive、品牌名、产品名和自然中英混合必须原样保留，不改大小写、符号或结构。"
         case .english:
             languageInstruction = """
             Natural American English. If source is Chinese or mixed, translate/rewrite like a fluent native speaker would write in Reddit, YouTube, X, work chat, or email.
             Avoid literal, stiff, textbook, corporate, or translation-like phrasing. Use contractions/idioms when natural; do not force slang, memes, emojis, jokes, or extra attitude.
-            Preserve meaning, tone, certainty, frequency, severity, and causal force. Keep proper nouns, code terms, product names, and intentional mixed terms. Do not weaken “every time / once and trust is lost / again and again” into “once in a while” or “occasionally”.
+            Preserve meaning, tone, certainty, frequency, severity, and causal force. Keep proper nouns, code terms, URLs, repository names, task IDs, HTML/XML tags, ::directives, product names, and intentional mixed terms exactly as written. Do not change their capitalization, symbols, or structure. Do not weaken “every time / once and trust is lost / again and again” into “once in a while” or “occasionally”.
             Return only the final English text. Do not add labels, explanations, markdown, quotes, or prefixes like "Here's the cleaned-up version of your input".
             """
         }

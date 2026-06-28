@@ -81,6 +81,8 @@ import Testing
     #expect(prompt.contains("标准模式"))
     #expect(prompt.contains("严格贴合原意"))
     #expect(prompt.contains("简体中文为主"))
+    #expect(prompt.contains("HTML/XML 标签"))
+    #expect(prompt.contains("原样保留"))
     #expect(prompt.contains("结构信号"))
     #expect(prompt.contains("未检测到明确分点"))
     #expect(prompt.contains("NexVoice"))
