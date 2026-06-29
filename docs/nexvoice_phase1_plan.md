@@ -179,7 +179,7 @@ DeepSeek 适合做 **最终润色、最终改写、文本翻译**，不适合做
 优点：
 
 - OpenAI/Anthropic 兼容格式，NexHub 当前 `LLMClient` 已经支持 `deepseek`。
-- 价格很低。官方价格页显示 `deepseek-chat` 输入 cache miss 为 `$0.14 / 1M tokens`，输出 `$0.28 / 1M tokens`；`deepseek-reasoner` 更贵且更慢。
+- 价格很低。官方价格页显示 `deepseek-v4-flash` 输入 cache miss 为 `$0.14 / 1M tokens`，输出 `$0.28 / 1M tokens`；`deepseek-v4-pro` 更贵，并发限制更低，不适合作为语音整理默认模型。
 - 中文文本能力强，适合把口语稿整理成自然文本。
 
 限制：
@@ -189,8 +189,8 @@ DeepSeek 适合做 **最终润色、最终改写、文本翻译**，不适合做
 
 建议：
 
-- 默认最终润色模型：`deepseek-chat`。
-- 不建议第一版默认用：`deepseek-reasoner`。
+- 默认最终润色模型：`deepseek-v4-flash`。
+- 不建议第一版默认用：`deepseek-v4-pro` 或 thinking/reasoning 模式。
 - 设置里保留 DeepSeek Base URL、API Key、Model。
 
 来源：[DeepSeek API Pricing](https://api-docs.deepseek.com/quick_start/pricing)、[DeepSeek API Docs](https://api-docs.deepseek.com/)。
@@ -296,8 +296,8 @@ DeepSeek 适合做 **最终润色、最终改写、文本翻译**，不适合做
 | --- | --- | --- |
 | 实时转写 | 腾讯云实时语音识别大模型版，或阿里 `qwen3-asr-flash-realtime` | 都是 WebSocket 实时，国内网络稳定 |
 | 实时同传 | 腾讯云大模型实时语音翻译 | 价格公开、直接支持语音翻译，链路更短 |
-| 最终润色 | DeepSeek `deepseek-chat` | 成本极低，中文文本能力强 |
-| 最终翻译稿改写 | DeepSeek `deepseek-chat` / Qwen Flash / 豆包 Lite | 低成本，速度够快 |
+| 最终润色 | DeepSeek `deepseek-v4-flash` | 成本极低，中文文本能力强，官方当前推荐新模型名 |
+| 最终翻译稿改写 | DeepSeek `deepseek-v4-flash` / Qwen Flash / 豆包 Lite | 低成本，速度够快 |
 | 端侧兜底 | 暂不默认启用 | 先预留接口，第二阶段验证 |
 
 优点：
@@ -319,7 +319,7 @@ DeepSeek 适合做 **最终润色、最终改写、文本翻译**，不适合做
 | --- | --- |
 | 实时转写 | OpenAI `gpt-realtime-whisper` |
 | 实时同传 | OpenAI `gpt-realtime-translate` |
-| 最终润色 | DeepSeek `deepseek-chat` 或 OpenAI mini |
+| 最终润色 | DeepSeek `deepseek-v4-flash` 或 OpenAI mini |
 
 优点：
 
@@ -406,7 +406,7 @@ DeepSeek 适合做 **最终润色、最终改写、文本翻译**，不适合做
 #### 最终润色
 
 - Provider：DeepSeek / Qwen / 豆包 / OpenAI / Gemini / Local。
-- Model：默认 `deepseek-chat`。
+- Model：默认 `deepseek-v4-flash`。
 - Base URL。
 - API Key。
 - Prompt 模板：
@@ -511,7 +511,7 @@ flowchart TD
 5. 接入一个同传 Provider：
    - 优先腾讯大模型实时语音翻译。
    - 备选百度实时语音翻译。
-6. 用 DeepSeek `deepseek-chat` 做最终润色。
+6. 用 DeepSeek `deepseek-v4-flash` 做最终润色。
 7. 记录真实延迟：
    - 首字延迟。
    - 中间结果稳定性。
@@ -570,7 +570,7 @@ flowchart TD
 2. **产品范围**：只做转写和中英同传，不做完整 Typeless 全功能。
 3. **实时转写优先验证**：当前已改为腾讯云实时语音识别大模型主链路；本地 SenseVoice/WhisperKit 作为离线兜底和质量对照。
 4. **实时同传优先验证**：腾讯云大模型实时语音翻译。
-5. **最终润色默认模型**：DeepSeek `deepseek-chat`。
+5. **最终润色默认模型**：DeepSeek `deepseek-v4-flash`。
 6. **端侧模型**：设置页预留接口，第二阶段再验证，不阻塞 MVP。
 7. **本地端口**：保留 NexHub 原 `8787`，新增 Voice Gateway `8791`，Local ASR `8792`，Local LLM `8793`。
 

@@ -1,6 +1,6 @@
 # NexVoice 当前进展
 
-更新时间：2026-06-27
+更新时间：2026-06-30
 
 ## 当前状态
 
@@ -12,6 +12,22 @@
 - 本地 SenseVoice Small 和 WhisperKit large-v3 保留为兜底和质量对照，不是当前默认主链路。
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
+
+## 本轮追加（2026-06-30：DeepSeek 官方新模型核对）
+
+- 官方核对：
+  - DeepSeek 官方 API 文档当前列出的主模型为 `deepseek-v4-flash` 和 `deepseek-v4-pro`。
+  - `deepseek-chat` / `deepseek-reasoner` 仍兼容，但官方标注会在 `2026-07-24 15:59 UTC` 弃用；其中旧 `deepseek-chat` 对应 `deepseek-v4-flash` 的 non-thinking 模式。
+- 本地核对：
+  - 当前核心代码 `DeepSeekFinalRewriteConfiguration` 默认已经是 `deepseek-v4-flash`，测试也已覆盖该默认值。
+  - 最近 `DeepSeekRewrite.jsonl` 日志记录的实际请求模型也是 `deepseek-v4-flash`。
+  - 当前 `/Applications/NexVoice.app` 二进制中也能确认使用 `deepseek-v4-flash`，安装版版本为 `0.1.57 (58)`。
+- 本轮处理：
+  - 核心代码无需再改模型名；避免把已正确的低延迟链路误改成更贵、更慢的 Pro。
+  - 已更新旧方案/交接文档中残留的 `deepseek-chat` 默认模型描述，统一指向 `deepseek-v4-flash`。
+- 已验证：
+  - `strings /Applications/NexVoice.app/Contents/MacOS/NexVoiceApp` 能找到 `deepseek-v4-flash`。
+  - 最近 DeepSeek 诊断日志显示多次 `model":"deepseek-v4-flash"` 且请求成功。
 
 ## 本轮追加（2026-06-28：Codex 连续改写保护 HTML / 指令 / 代码类字面内容）
 

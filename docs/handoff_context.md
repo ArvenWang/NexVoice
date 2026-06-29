@@ -72,7 +72,7 @@ NexVoice 第一版只做两个核心功能：
 
 - 实时转写：腾讯云实时 ASR 大模型版，或阿里 `qwen3-asr-flash-realtime`。
 - 实时同传：腾讯云大模型实时语音翻译。
-- 最终润色：DeepSeek `deepseek-chat`。
+- 最终润色：DeepSeek `deepseek-v4-flash`。
 
 备选：
 
@@ -130,7 +130,7 @@ NexVoice 第一版只做两个核心功能：
 4. 做 `AVAudioEngine` 音频采集 Spike。
 5. 接一个实时 ASR Provider，先验证首字延迟。
 6. 接一个实时同传 Provider，验证中文和英文双向效果。
-7. 接 DeepSeek `deepseek-chat` 做最终润色。
+7. 接 DeepSeek `deepseek-v4-flash` 做最终润色。
 
 推荐给下一轮 Agent 的开场指令：
 
