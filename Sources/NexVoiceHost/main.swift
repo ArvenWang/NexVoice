@@ -547,14 +547,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rewriteTask?.cancel()
         rewriteTask = nil
 
-        guard permissionService.authorizationStatus() == .authorized else {
-            captionPanel.showPreparing()
-            requestMicrophonePermission()
-            isQuickShortcutCommandSession = false
-            beginSessionTask = nil
-            return
-        }
-
         let targetApplication = targetApplicationForCurrentSession
         let personalDictionary = VoicePersonalDictionaryStore.load()
         rewriteContextForCurrentSession = textInserter.rewriteContext(
@@ -563,7 +555,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             personalDictionary: personalDictionary
         )
         let quickShortcutSelectedTextDetectionStartedAt = Date()
-        let selectedTextDetection = await textInserter.selectedTextQuestionDetection(in: targetApplication)
+        let selectedTextDetection = await textInserter.selectedTextQuestionDetectionForQuickShortcut(in: targetApplication)
         let selectedTextDetectionDurationMs = Date().timeIntervalSince(quickShortcutSelectedTextDetectionStartedAt) * 1000
         let selectedTextContext = selectedTextDetection.context
         logShortcutRoute(
@@ -607,29 +599,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        do {
-            logShortcutRoute(
-                event: "transcription_service_start_requested",
-                routeAction: "beginQuickShortcutCommand",
-                interactionMode: ContextCaptureInteractionMode.quickShortcutCommand.rawValue
-            )
-            try transcriptionService.start(
-                personalDictionary: personalDictionary,
-                rewriteContext: rewriteContextForCurrentSession
-            ) { [weak self] event in
-                Task { @MainActor [weak self] in
-                    self?.handleTranscriptionEvent(event)
-                }
-            }
-            statusItem?.button?.title = "NexVoice 快捷指令中"
-            refreshMenuState()
-            captionPanel.showOverlay()
-        } catch {
-            captionPanel.showStatus("启动失败", isError: true, autoHideDelay: 1.4)
-            statusItem?.button?.title = "NexVoice 出错"
-            isQuickShortcutCommandSession = false
-            refreshMenuState()
-        }
+        logShortcutRoute(
+            event: "quick_shortcut_selected_text_not_found",
+            routeAction: "beginQuickShortcutCommand",
+            interactionMode: ContextCaptureInteractionMode.quickShortcutCommand.rawValue,
+            selectedTextDetectionDurationMs: selectedTextDetectionDurationMs,
+            selectedTextDetectionSource: selectedTextDetection.source,
+            selectedTextDetectionFound: false,
+            selectedTextFocusedChainCount: selectedTextDetection.focusedChainCount,
+            selectedTextSearchRootCount: selectedTextDetection.searchRootCount,
+            selectedTextScannedNodeCount: selectedTextDetection.scannedNodeCount,
+            selectedTextDidUseRecursiveScan: selectedTextDetection.didUseRecursiveScan,
+            selectedTextDidSeeAXSelectionSignal: selectedTextDetection.didSeeAXSelectionSignal,
+            selectedTextShouldFallbackToMouseContext: selectedTextDetection.shouldFallbackToMouseContext,
+            selectedTextClipboardDurationMs: selectedTextDetection.clipboardDurationMs,
+            selectedTextClipboardDidChange: selectedTextDetection.clipboardDidChange,
+            selectedTextClipboardTextCharacters: selectedTextDetection.clipboardTextCharacters,
+            selectedTextClipboardRestoreSucceeded: selectedTextDetection.clipboardRestoreSucceeded
+        )
+        captionPanel.showStatus("未检测到选中文本，请先选中文本后再三击", isError: true, autoHideDelay: 1.4)
+        statusItem?.button?.title = "NexVoice"
+        isQuickShortcutCommandSession = false
+        refreshMenuState()
     }
 
     private func startQuickShortcutCommandRewrite(

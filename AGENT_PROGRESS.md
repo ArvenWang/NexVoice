@@ -13,6 +13,18 @@
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
+## 本轮追加（2026-06-30：三击快捷指令命中门槛修正）
+
+- 本轮结论：
+  - 三击默认按当前选中文本直接执行快捷指令，不再进入麦克风/补充指令分支。
+  - 保留“快捷指令”下拉样式（与工作流输出模式一致），仅保留“快速翻译”一项；本地 `SettingsWeb/dist` 已同步。
+  - 若未检测到选中文本，直接提示“未检测到选中文本”，避免误以为触发成功却无动作。
+- 已执行：
+  - `Sources/NexVoiceHost/main.swift`：三击链路改为 `selectedTextQuestionDetectionForQuickShortcut`，并在未命中时直接 `quick_shortcut_selected_text_not_found` 失败提示。
+  - `swift test --disable-sandbox --quiet` 通过（154 tests）。
+  - `SettingsWeb` 产物重新构建：`cd SettingsWeb && npm run build`。
+  - 打包并安装到 `/Applications/NexVoice.app`，备份旧版为 `dist/install-backups/NexVoice-20260630-224311-post-quickcommand-install-fix.app`（如路径存在），新版本 `CFBundleShortVersionString=0.1.62`，`CFBundleVersion=63`。
+
 
 ## 本轮追加（2026-06-30：三击快捷指令直译行为修正）
 

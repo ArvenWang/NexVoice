@@ -132,7 +132,24 @@ final class FocusedTextInserter {
     }
 
     func selectedTextQuestionDetection(in targetApplication: NSRunningApplication?) async -> SelectedTextQuestionDetection {
-        let accessibilityDetection = Self.selectedTextQuestionDetection(in: targetApplication)
+        let accessibilityDetection = Self.selectedTextQuestionDetection(
+            in: targetApplication,
+            includeEditableSelection: false
+        )
+        if accessibilityDetection.context != nil {
+            return accessibilityDetection
+        }
+        return await selectedTextQuestionDetectionUsingClipboardFallback(
+            in: targetApplication,
+            accessibilityDetection: accessibilityDetection
+        )
+    }
+
+    func selectedTextQuestionDetectionForQuickShortcut(in targetApplication: NSRunningApplication?) async -> SelectedTextQuestionDetection {
+        let accessibilityDetection = Self.selectedTextQuestionDetection(
+            in: targetApplication,
+            includeEditableSelection: true
+        )
         if accessibilityDetection.context != nil {
             return accessibilityDetection
         }
@@ -342,7 +359,8 @@ final class FocusedTextInserter {
     }
 
     private static func selectedTextQuestionDetection(
-        in targetApplication: NSRunningApplication?
+        in targetApplication: NSRunningApplication?,
+        includeEditableSelection: Bool
     ) -> SelectedTextQuestionDetection {
         let startedAt = Date()
         let recursiveScanTimeoutSeconds: TimeInterval = 0.25
@@ -354,6 +372,9 @@ final class FocusedTextInserter {
             for element in chain {
                 if selectedTextLength(on: element) > 0 {
                     didSeeAXSelectionSignal = true
+                }
+                if !includeEditableSelection && isEditableTextElement(element) {
+                    continue
                 }
                 if let context = selectedTextContext(from: element) {
                     return SelectedTextQuestionDetection(
@@ -378,6 +399,9 @@ final class FocusedTextInserter {
         var visited = 0
         var didTimeOut = false
         for root in roots {
+            if !includeEditableSelection && isEditableTextElement(root) {
+                continue
+            }
             if let context = nonEditableSelectedTextContext(
                 from: root,
                 visited: &visited,
