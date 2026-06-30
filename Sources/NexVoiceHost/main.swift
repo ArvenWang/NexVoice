@@ -512,12 +512,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         beginSessionTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            self.beginQuickShortcutCommandAfterSelectionCapture()
+            await self.beginQuickShortcutCommandAfterSelectionCapture()
             self.beginSessionTask = nil
         }
     }
 
-    private func beginQuickShortcutCommandAfterSelectionCapture() {
+    private func beginQuickShortcutCommandAfterSelectionCapture() async {
         targetApplicationForCurrentSession = NSWorkspace.shared.frontmostApplication
         selectedTextContextForCurrentSession = nil
         rewriteContextForCurrentSession = nil
@@ -562,6 +562,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             selectedTextMode: false,
             personalDictionary: personalDictionary
         )
+        let quickShortcutSelectedTextDetectionStartedAt = Date()
+        let selectedTextDetection = await textInserter.selectedTextQuestionDetection(in: targetApplication)
+        let selectedTextDetectionDurationMs = Date().timeIntervalSince(quickShortcutSelectedTextDetectionStartedAt) * 1000
+        let selectedTextContext = selectedTextDetection.context
+        logShortcutRoute(
+            event: "quick_shortcut_selected_text_detection_finished",
+            routeAction: "beginQuickShortcutCommand",
+            selectedTextDetectionDurationMs: selectedTextDetectionDurationMs,
+            selectedTextDetectionSource: selectedTextDetection.source,
+            selectedTextDetectionFound: selectedTextContext != nil,
+            selectedTextCharacters: selectedTextContext?.text.count,
+            selectedTextFocusedChainCount: selectedTextDetection.focusedChainCount,
+            selectedTextSearchRootCount: selectedTextDetection.searchRootCount,
+            selectedTextScannedNodeCount: selectedTextDetection.scannedNodeCount,
+            selectedTextDidUseRecursiveScan: selectedTextDetection.didUseRecursiveScan,
+            selectedTextDidSeeAXSelectionSignal: selectedTextDetection.didSeeAXSelectionSignal,
+            selectedTextShouldFallbackToMouseContext: selectedTextDetection.shouldFallbackToMouseContext,
+            selectedTextClipboardDurationMs: selectedTextDetection.clipboardDurationMs,
+            selectedTextClipboardDidChange: selectedTextDetection.clipboardDidChange,
+            selectedTextClipboardTextCharacters: selectedTextDetection.clipboardTextCharacters,
+            selectedTextClipboardRestoreSucceeded: selectedTextDetection.clipboardRestoreSucceeded
+        )
+        if let selectedTextContext {
+            logShortcutRoute(event: "quick_shortcut_selected_text_found", routeAction: "beginQuickShortcutCommand")
+            contextQuestionCaptureIDForCurrentSession = UUID().uuidString
+            contextQuestionAnchorRectForCurrentSession = selectedTextContext.anchorRect
+            self.selectedTextContextForCurrentSession = selectedTextContext
+            rewriteContextForCurrentSession = textInserter.rewriteContext(
+                in: targetApplication,
+                selectedTextMode: true,
+                personalDictionary: personalDictionary
+            )
+            if let rewriteContextForCurrentSession {
+                startQuickShortcutCommandRewrite(
+                    sourceText: selectedTextContext.text,
+                    originalText: selectedTextContext.text,
+                    targetApplication: targetApplication,
+                    rewriteContext: rewriteContextForCurrentSession,
+                    insertionMode: .insertAtCursor,
+                    anchorRect: selectedTextContext.anchorRect
+                )
+            }
+            return
+        }
 
         do {
             logShortcutRoute(
@@ -585,6 +629,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusItem?.button?.title = "NexVoice 出错"
             isQuickShortcutCommandSession = false
             refreshMenuState()
+        }
+    }
+
+    private func startQuickShortcutCommandRewrite(
+        sourceText: String,
+        originalText: String,
+        targetApplication: NSRunningApplication?,
+        rewriteContext: VoiceRewriteContext,
+        insertionMode: VoiceContinuousRewriteInsertionMode,
+        anchorRect: CGRect?
+    ) {
+        captionPanel.showLoading("AI 处理中", anchorRect: anchorRect)
+        statusItem?.button?.title = "NexVoice 整理中"
+        refreshMenuState()
+
+        let outputLanguage = selectedOutputLanguage
+        let rewriteStyle = rewriteStyle(for: rewriteContext)
+        rewriteTask?.cancel()
+        rewriteTask = Task { [weak self] in
+            guard let self else { return }
+            let textForInsertion: String
+            do {
+                textForInsertion = try await self.finalRewriteService.handleQuickShortcutCommand(
+                    sourceText: sourceText,
+                    command: self.voiceShortcutQuickCommand,
+                    outputLanguage: outputLanguage,
+                    style: rewriteStyle,
+                    context: rewriteContext
+                )
+            } catch is CancellationError {
+                return
+            } catch {
+                textForInsertion = VoicePersonalDictionaryTextProtector.protect(
+                    VoiceRewriteFallbackPolicy.fallbackText(for: originalText),
+                    dictionary: rewriteContext.personalDictionary
+                )
+            }
+
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                guard !self.isCurrentSessionCancelled else { return }
+                self.insertRewrittenText(
+                    textForInsertion,
+                    originalASRText: originalText,
+                    rewriteContext: rewriteContext,
+                    into: targetApplication,
+                    insertionMode: insertionMode
+                )
+            }
         }
     }
 
@@ -1355,52 +1449,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 newTranscript: originalText,
                 hasEditableSelection: hasEditableSelectionForCurrentSession
             )
-            let outputLanguage = selectedOutputLanguage
             let rewriteContext = rewriteContextForCurrentSession ?? VoiceRewriteContext(
                 sourceApplicationName: targetApplicationForCurrentSession?.localizedName,
                 sourceApplicationBundleIdentifier: targetApplicationForCurrentSession?.bundleIdentifier,
                 selectedTextMode: false,
                 personalDictionary: VoicePersonalDictionaryStore.load()
             )
-            let rewriteStyle = rewriteStyle(for: rewriteContext)
             let targetApplication = targetApplicationForCurrentSession
-            rewriteTask?.cancel()
-            rewriteTask = Task { [weak self] in
-                guard let self else { return }
-                let textForInsertion: String
-                let insertionMode: VoiceContinuousRewriteInsertionMode
-                do {
-                    textForInsertion = try await self.finalRewriteService.handleQuickShortcutCommand(
-                        sourceText: continuousRewriteDecision.rewriteSource,
-                        command: self.voiceShortcutQuickCommand,
-                        outputLanguage: outputLanguage,
-                        style: rewriteStyle,
-                        context: rewriteContext
-                    )
-                    insertionMode = continuousRewriteDecision.insertionMode
-                } catch is CancellationError {
-                    return
-                } catch {
-                    textForInsertion = VoicePersonalDictionaryTextProtector.protect(
-                        VoiceRewriteFallbackPolicy.fallbackText(for: originalText),
-                        dictionary: rewriteContext.personalDictionary
-                    )
-                    insertionMode = .insertAtCursor
-                }
-
-                guard !Task.isCancelled else { return }
-
-                await MainActor.run {
-                    guard !self.isCurrentSessionCancelled else { return }
-                    self.insertRewrittenText(
-                        textForInsertion,
-                        originalASRText: originalText,
-                        rewriteContext: rewriteContext,
-                        into: targetApplication,
-                        insertionMode: insertionMode
-                    )
-                }
-            }
+            startQuickShortcutCommandRewrite(
+                sourceText: continuousRewriteDecision.rewriteSource,
+                originalText: originalText,
+                targetApplication: targetApplication,
+                rewriteContext: rewriteContext,
+                insertionMode: continuousRewriteDecision.insertionMode,
+                anchorRect: contextQuestionAnchorRectForCurrentSession ?? selectedTextContextForCurrentSession?.anchorRect
+            )
             return
         }
 

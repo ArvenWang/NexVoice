@@ -13,6 +13,19 @@
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
+
+## 本轮追加（2026-06-30：三击快捷指令直译行为修正）
+
+- 本轮结论：
+  - `SettingsWeb` 的“快捷指令”右侧改为与工作流输出模式同款下拉（仅保留“快速翻译”），并保持与配置联动。
+  - 三击按键在主链路中不再需要额外口令，优先走 `selectedTextQuestionDetection` 读取选中文本，命中后直接调用 `handleQuickShortcutCommand`（默认执行“快速翻译”：中文→English，非中文→简体中文）。
+  - 若未命中选中内容，仍按语音输入走 ASR 后执行默认快捷指令。
+- 实施与验证：
+  - `swift test --disable-sandbox --quiet` 通过（154 tests）。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - 已安装到 `/Applications/NexVoice.app`；`CFBundleShortVersionString=0.1.61`，`CFBundleVersion=62`。
+  - 已确认打包后 `SettingsWeb` 产物内的设置页“快捷指令”已使用下拉样式。
+
 ## 本轮追加（2026-06-30：DeepSeek 官方新模型核对）
 
 - 官方核对：
