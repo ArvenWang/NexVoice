@@ -42,6 +42,19 @@
   - `strings /Applications/NexVoice.app/Contents/MacOS/NexVoiceApp` 能找到 `deepseek-v4-flash`。
   - 最近 DeepSeek 诊断日志显示多次 `model":"deepseek-v4-flash"` 且请求成功。
 
+## 本轮追加（2026-06-30：重建安装与验收）
+
+- 执行了 `./scripts/build_app.sh release --embed-local-keys` 重新构建。
+- 将新包安装到 `/Applications/NexVoice.app`，并保留备份：
+  `dist/install-backups/NexVoice-20260630-221445-post-triple-shortcut.app`
+- 运行校验：
+  - `codesign --verify --deep --strict --verbose=2 /Applications/NexVoice.app` 通过
+  - `plutil -lint /Applications/NexVoice.app/Contents/Info.plist` 通过
+  - `CFBundleShortVersionString`：`0.1.58`
+  - `CFBundleVersion`：`59`
+  - 二进制模型标识：`deepseek-v4-flash`
+- 已启动新安装的 App（进程名 `NexVoiceApp`，PID `7084`）。
+
 ## 本轮追加（2026-06-28：Codex 连续改写保护 HTML / 指令 / 代码类字面内容）
 
 - 日志定位：
