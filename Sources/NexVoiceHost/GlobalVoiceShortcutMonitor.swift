@@ -376,6 +376,9 @@ final class GlobalVoiceShortcutMonitor {
 
     private func handleShortPressEnded(pressCount: Int) {
         if pressCount >= 3 {
+            pendingShortPressWorkItem?.cancel()
+            pendingShortPressWorkItem = nil
+            pendingShortPressWorkItemID &+= 1
             shortPressTapCount = 0
             logShortcutEvent("triple_trigger_fired", triggerKind: "triple")
             onTripleTrigger?()
