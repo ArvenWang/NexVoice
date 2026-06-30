@@ -144,10 +144,12 @@ function App() {
 }
 
 function InputPage({ state }: { state: SettingsState }) {
+  const [isShortcutCommandMenuOpen, setIsShortcutCommandMenuOpen] = useState(false);
+
   return (
     <div className="page">
       <h1>常规</h1>
-      <section className="card">
+      <section className={`card ${isShortcutCommandMenuOpen ? "menu-open" : ""}`}>
         <div className="card-row interactive-row">
           <div>
             <h2>快捷键</h2>
@@ -193,23 +195,37 @@ function InputPage({ state }: { state: SettingsState }) {
             </button>
           </div>
         </div>
-        <div className="card-row interactive-row">
+        <div className="card-row interactive-row select-row">
           <div>
             <h2>快捷指令</h2>
             <p>按三击快捷键触发执行的默认指令。</p>
           </div>
-          <div className="segmented compact-segmented">
-            {Object.keys(state.shortcutCommand).length > 0 &&
-              (Object.entries(shortcutCommandTitles) as Array<[ShortcutCommand, string]>).map(([command, title]) => (
-                <button
-                  key={command}
-                  type="button"
-                  className={state.shortcutCommand.value === command ? "active" : ""}
-                  onClick={() => postToNative({ type: "setShortcutCommand", command })}
-                >
-                  {title}
-                </button>
-              ))}
+          <div className="custom-select">
+            <button
+              type="button"
+              className={`select-trigger ${isShortcutCommandMenuOpen ? "open" : ""}`}
+              onClick={() => setIsShortcutCommandMenuOpen((open) => !open)}
+            >
+              <span>{shortcutCommandTitles[state.shortcutCommand.value] ?? state.shortcutCommand.title}</span>
+              <IconChevronDown className="select-icon" size={16} stroke={2.2} aria-hidden />
+            </button>
+            {isShortcutCommandMenuOpen && (
+              <div className="select-menu" role="listbox">
+                {(Object.entries(shortcutCommandTitles) as Array<[ShortcutCommand, string]>).map(([command, title]) => (
+                  <button
+                    key={command}
+                    type="button"
+                    className={state.shortcutCommand.value === command ? "active" : ""}
+                    onClick={() => {
+                      postToNative({ type: "setShortcutCommand", command });
+                      setIsShortcutCommandMenuOpen(false);
+                    }}
+                  >
+                    <span>{title}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </section>
