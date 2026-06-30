@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case focusedInputScreenReply = "focused_input_screen_reply"
         case mouseContextQuestion = "mouse_context_question"
         case selectedTextQuestion = "selected_text_question"
+        case quickShortcutCommand = "quick_shortcut_command"
     }
 
     private var statusItem: NSStatusItem?
@@ -56,11 +57,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let shortcutStore = VoiceShortcutStore()
     private let workflowRewriteStyleStore = VoiceWorkflowRewriteStyleStore()
     private let shortcutMonitor = GlobalVoiceShortcutMonitor()
+    private let shortcutQuickCommandStore = VoiceShortcutQuickCommandStore()
     private var settingsWindowController: VoiceWebSettingsWindowController?
     private var settingsPreviewApplication: NSRunningApplication?
     private var selectedOutputLanguage = VoiceOutputLanguage.simplifiedChinese
     private var selectedRewriteStyle = VoiceRewriteStyle.default
     private var voiceShortcut: VoiceShortcut = .default
+    private var voiceShortcutQuickCommand: VoiceShortcutQuickCommand = .default
     private var targetApplicationForCurrentSession: NSRunningApplication?
     private var selectedTextContextForCurrentSession: SelectedTextContext?
     private var rewriteContextForCurrentSession: VoiceRewriteContext?
@@ -80,6 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var latestRecoverableASRText: String?
     private var pendingFailedTranscriptionRetry: FailedTranscriptionRetry?
     private var isRewritingCurrentSession = false
+    private var isQuickShortcutCommandSession = false
     private var isScreenReplyInstructionSession = false
     private var contextCaptureInteractionModeForCurrentSession: ContextCaptureInteractionMode?
     private var didDetectScreenReplyVoiceInstruction = false
@@ -94,6 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         voiceShortcut = shortcutStore.load()
+        voiceShortcutQuickCommand = shortcutQuickCommandStore.load()
         selectedOutputLanguage = Self.loadOutputLanguage()
         selectedRewriteStyle = Self.loadRewriteStyle()
         configureStatusItem()
@@ -209,6 +214,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             beginContextQuestion()
         case .finish:
             stopTranscription()
+        case .beginQuickCommand:
+            break
         case .ignore:
             break
         }
@@ -225,7 +232,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch action {
         case .beginContextQuestion:
             beginContextQuestion()
+        case .beginQuickCommand:
+            break
         case .begin, .finish, .ignore:
+            break
+        }
+    }
+
+    private func handleShortcutTripleTriggered() {
+        logShortcutRoute(event: "triple_trigger_received", triggerKind: "triple")
+        guard !isRewritingCurrentSession, rewriteTask == nil, beginSessionTask == nil else {
+            logShortcutRoute(event: "triple_trigger_ignored_busy", triggerKind: "triple")
+            return
+        }
+        let action = VoiceShortcutTriggerPolicy.action(for: shortcutSessionState, trigger: .triple)
+        logShortcutRoute(event: "triple_trigger_routed", triggerKind: "triple", routeAction: String(describing: action))
+        switch action {
+        case .beginQuickCommand:
+            beginQuickShortcutCommand()
+        case .begin, .finish, .beginContextQuestion, .ignore:
             break
         }
     }
@@ -245,6 +270,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             onDoubleTrigger: { [weak self] in
                 self?.handleShortcutDoubleTriggered()
+            },
+            onTripleTrigger: { [weak self] in
+                self?.handleShortcutTripleTriggered()
             },
             shouldDelayShortPressForDoubleTrigger: { [weak self] in
                 self?.shouldWaitForDoubleShortcut ?? false
@@ -315,6 +343,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let controller = settingsController(selectedTab: tab)
         controller.update(
             shortcut: voiceShortcut,
+            shortcutCommand: voiceShortcutQuickCommand,
             outputLanguage: selectedOutputLanguage,
             rewriteStyle: selectedRewriteStyle
         )
@@ -330,6 +359,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let controller = VoiceWebSettingsWindowController(
             selectedTab: tab,
             shortcut: voiceShortcut,
+            shortcutCommand: voiceShortcutQuickCommand,
             outputLanguage: selectedOutputLanguage,
             rewriteStyle: selectedRewriteStyle,
             workflowContextProvider: { [weak self] in
@@ -348,6 +378,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.shortcutMonitor.updateShortcut(shortcut)
                 self.captionPanel.reset()
                 self.refreshMenuState()
+            },
+            onShortcutCommandChanged: { [weak self] command in
+                guard let self else { return }
+                self.voiceShortcutQuickCommand = command
+                self.shortcutQuickCommandStore.save(command)
             },
             onOutputLanguageChanged: { [weak self] language in
                 guard let self else { return }
@@ -466,6 +501,90 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         beginSessionTask = Task { @MainActor [weak self] in
             guard let self else { return }
             await self.beginContextQuestionAfterSelectionCapture()
+        }
+    }
+
+    private func beginQuickShortcutCommand() {
+        guard beginSessionTask == nil else { return }
+        logShortcutRoute(
+            event: "begin_quick_shortcut_command_requested",
+            routeAction: "beginQuickShortcutCommand"
+        )
+        beginSessionTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.beginQuickShortcutCommandAfterSelectionCapture()
+            self.beginSessionTask = nil
+        }
+    }
+
+    private func beginQuickShortcutCommandAfterSelectionCapture() {
+        targetApplicationForCurrentSession = NSWorkspace.shared.frontmostApplication
+        selectedTextContextForCurrentSession = nil
+        rewriteContextForCurrentSession = nil
+        focusedDraftForCurrentSession = nil
+        focusedDraftReadMethodForCurrentSession = nil
+        focusedDraftIsTrustedForCurrentSession = false
+        hasEditableSelectionForCurrentSession = false
+        screenReplyCapturedContextForCurrentSession = nil
+        pendingScreenReplyVoiceInstruction = nil
+        didInsertCurrentSession = false
+        isCurrentSessionCancelled = false
+        insertedTextPreview = nil
+        latestRecoverableASRText = nil
+        pendingFailedTranscriptionRetry = nil
+        isRewritingCurrentSession = false
+        isQuickShortcutCommandSession = true
+        isScreenReplyInstructionSession = false
+        contextCaptureInteractionModeForCurrentSession = .quickShortcutCommand
+        contextQuestionCaptureIDForCurrentSession = nil
+        contextQuestionAnchorRectForCurrentSession = nil
+        contextQuestionStartedAt = nil
+        didDetectScreenReplyVoiceInstruction = false
+        dictionaryLearningMonitor.cancel()
+        contextCaptureTask?.cancel()
+        contextCaptureTask = nil
+        ocrRegionOverlay.hide()
+        rewriteTask?.cancel()
+        rewriteTask = nil
+
+        guard permissionService.authorizationStatus() == .authorized else {
+            captionPanel.showPreparing()
+            requestMicrophonePermission()
+            isQuickShortcutCommandSession = false
+            beginSessionTask = nil
+            return
+        }
+
+        let targetApplication = targetApplicationForCurrentSession
+        let personalDictionary = VoicePersonalDictionaryStore.load()
+        rewriteContextForCurrentSession = textInserter.rewriteContext(
+            in: targetApplication,
+            selectedTextMode: false,
+            personalDictionary: personalDictionary
+        )
+
+        do {
+            logShortcutRoute(
+                event: "transcription_service_start_requested",
+                routeAction: "beginQuickShortcutCommand",
+                interactionMode: ContextCaptureInteractionMode.quickShortcutCommand.rawValue
+            )
+            try transcriptionService.start(
+                personalDictionary: personalDictionary,
+                rewriteContext: rewriteContextForCurrentSession
+            ) { [weak self] event in
+                Task { @MainActor [weak self] in
+                    self?.handleTranscriptionEvent(event)
+                }
+            }
+            statusItem?.button?.title = "NexVoice 快捷指令中"
+            refreshMenuState()
+            captionPanel.showOverlay()
+        } catch {
+            captionPanel.showStatus("启动失败", isError: true, autoHideDelay: 1.4)
+            statusItem?.button?.title = "NexVoice 出错"
+            isQuickShortcutCommandSession = false
+            refreshMenuState()
         }
     }
 
@@ -1213,6 +1332,78 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        if contextCaptureInteractionModeForCurrentSession == .quickShortcutCommand {
+            Task {
+                await ContinuousRewriteDiagnosticsLogger.shared.log(
+                    ContinuousRewriteDiagnosticEvent(
+                        event: "decision",
+                        appName: targetApplicationForCurrentSession?.localizedName,
+                        bundleIdentifier: targetApplicationForCurrentSession?.bundleIdentifier,
+                        hasEditableSelection: hasEditableSelectionForCurrentSession,
+                        focusedDraft: focusedDraftForCurrentSession,
+                        focusedDraftTrusted: focusedDraftIsTrustedForCurrentSession,
+                        newTranscript: originalText,
+                        insertionMode: .insertAtCursor,
+                        draftReadMethod: focusedDraftReadMethodForCurrentSession
+                    )
+                )
+            }
+
+            let continuousRewriteDecision = VoiceContinuousRewritePolicy.decision(
+                focusedDraft: focusedDraftForCurrentSession,
+                focusedDraftIsTrusted: focusedDraftIsTrustedForCurrentSession,
+                newTranscript: originalText,
+                hasEditableSelection: hasEditableSelectionForCurrentSession
+            )
+            let outputLanguage = selectedOutputLanguage
+            let rewriteContext = rewriteContextForCurrentSession ?? VoiceRewriteContext(
+                sourceApplicationName: targetApplicationForCurrentSession?.localizedName,
+                sourceApplicationBundleIdentifier: targetApplicationForCurrentSession?.bundleIdentifier,
+                selectedTextMode: false,
+                personalDictionary: VoicePersonalDictionaryStore.load()
+            )
+            let rewriteStyle = rewriteStyle(for: rewriteContext)
+            let targetApplication = targetApplicationForCurrentSession
+            rewriteTask?.cancel()
+            rewriteTask = Task { [weak self] in
+                guard let self else { return }
+                let textForInsertion: String
+                let insertionMode: VoiceContinuousRewriteInsertionMode
+                do {
+                    textForInsertion = try await self.finalRewriteService.handleQuickShortcutCommand(
+                        sourceText: continuousRewriteDecision.rewriteSource,
+                        command: self.voiceShortcutQuickCommand,
+                        outputLanguage: outputLanguage,
+                        style: rewriteStyle,
+                        context: rewriteContext
+                    )
+                    insertionMode = continuousRewriteDecision.insertionMode
+                } catch is CancellationError {
+                    return
+                } catch {
+                    textForInsertion = VoicePersonalDictionaryTextProtector.protect(
+                        VoiceRewriteFallbackPolicy.fallbackText(for: originalText),
+                        dictionary: rewriteContext.personalDictionary
+                    )
+                    insertionMode = .insertAtCursor
+                }
+
+                guard !Task.isCancelled else { return }
+
+                await MainActor.run {
+                    guard !self.isCurrentSessionCancelled else { return }
+                    self.insertRewrittenText(
+                        textForInsertion,
+                        originalASRText: originalText,
+                        rewriteContext: rewriteContext,
+                        into: targetApplication,
+                        insertionMode: insertionMode
+                    )
+                }
+            }
+            return
+        }
+
         let continuousRewriteDecision = VoiceContinuousRewritePolicy.decision(
             focusedDraft: focusedDraftForCurrentSession,
             focusedDraftIsTrusted: focusedDraftIsTrustedForCurrentSession,
@@ -1411,6 +1602,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         contextQuestionCaptureIDForCurrentSession = nil
         contextQuestionAnchorRectForCurrentSession = nil
         contextQuestionStartedAt = nil
+        isQuickShortcutCommandSession = false
         contextCaptureTask?.cancel()
         contextCaptureTask = nil
         isRewritingCurrentSession = false
@@ -1430,6 +1622,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !isCurrentSessionCancelled else { return }
         insertedTextPreview = text
         isRewritingCurrentSession = false
+        isQuickShortcutCommandSession = false
         rewriteTask = nil
         rewriteContextForCurrentSession = nil
         focusedDraftForCurrentSession = nil
@@ -1824,6 +2017,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func finishScreenReplyWithError(_ error: Error) {
         isRewritingCurrentSession = false
+        isQuickShortcutCommandSession = false
         let interactionMode = contextCaptureInteractionModeForCurrentSession
         finishScreenReplyInstructionSession()
         rewriteTask = nil
@@ -1858,6 +2052,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         didInsertCurrentSession = true
         isRewritingCurrentSession = false
         isScreenReplyInstructionSession = false
+        isQuickShortcutCommandSession = false
         selectedTextContextForCurrentSession = nil
         rewriteContextForCurrentSession = nil
         focusedDraftForCurrentSession = nil
@@ -1973,6 +2168,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         targetApplicationForCurrentSession = nil
         isRewritingCurrentSession = false
         isScreenReplyInstructionSession = false
+        isQuickShortcutCommandSession = false
         contextCaptureInteractionModeForCurrentSession = nil
         contextQuestionCaptureIDForCurrentSession = nil
         contextQuestionAnchorRectForCurrentSession = nil
@@ -2004,6 +2200,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             isRewritingCurrentSession = false
+            isQuickShortcutCommandSession = false
             rewriteTask?.cancel()
             rewriteTask = nil
             focusedDraftForCurrentSession = nil

@@ -130,6 +130,16 @@ public enum VoiceRewritePromptPolicy {
     - 信息不足时直接说明不足，不编造上下文外的信息。
     """
 
+    public static let quickShortcutCommandSystemPrompt = """
+    你是快捷指令执行助手。用户给一段文本和固定指令，必须按指令直接产出结果。
+
+    规则：
+    - 只输出最终结果，不要解释、不复述、不加前后缀。
+    - 不要复写原文，不要重复显示上下文结构。
+    - 只在必要时保留数字、术语、专名、代码、URL、仓库名、任务 ID、HTML/XML 标签与 ::directive 的原文结构。
+    - 如果上下文中有用户当前正在输入的内容，优先用它来保留语气、术语和专名，不改变事实。
+    """
+
     public static func promptPlan(
         for text: String,
         outputLanguage: VoiceOutputLanguage,
@@ -217,6 +227,18 @@ public enum VoiceRewritePromptPolicy {
                 style: style,
                 context: context
             )
+        )
+    }
+
+    public static func quickShortcutCommandPromptPlan(
+        sourceText: String,
+        command: VoiceShortcutQuickCommand,
+        context: VoiceRewriteContext? = nil
+    ) -> VoiceRewritePromptPlan {
+        VoiceRewritePromptPlan(
+            mode: .full,
+            systemPrompt: quickShortcutCommandSystemPrompt,
+            userPrompt: quickShortcutCommandPrompt(sourceText: sourceText, command: command, context: context)
         )
     }
 
@@ -418,6 +440,31 @@ public enum VoiceRewritePromptPolicy {
         \(contextLabel)：
         \(sourceText.trimmingCharacters(in: .whitespacesAndNewlines))
         """
+    }
+
+    private static func quickShortcutCommandPrompt(
+        sourceText: String,
+        command: VoiceShortcutQuickCommand,
+        context: VoiceRewriteContext? = nil
+    ) -> String {
+        switch command {
+        case .quickTranslate:
+            return """
+            快捷指令：快速翻译
+
+            任务：
+            - 判断源文本是否为中文；如果是中文请翻译成英文。
+            - 源文本如果不是中文，请翻译成自然、准确的简体中文。
+            - 保留数字、专有名词、代码、URL、仓库名、任务 ID、HTML/XML 标签和 ::directive 的字面内容。
+            - 只输出翻译结果，不输出解释与注释。
+
+            参考上下文（只做写作风格与术语保留）：
+            \(context?.promptBlock ?? "当前上下文：未知")
+
+            待处理文本：
+            \(sourceText.trimmingCharacters(in: .whitespacesAndNewlines))
+            """
+        }
     }
 }
 

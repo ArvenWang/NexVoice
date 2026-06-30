@@ -3,6 +3,10 @@ import type { BridgeMessage, SettingsState } from "./types";
 export const demoState: SettingsState = {
   selectedTab: "input",
   versionText: "0.1.9 (10)",
+  shortcutCommand: {
+    title: "快速翻译",
+    value: "quick-translate"
+  },
   shortcut: { title: "右 Alt", recording: false },
   outputLanguage: "simplifiedChinese",
   rewriteStyle: "standard",

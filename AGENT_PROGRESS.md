@@ -25,6 +25,19 @@
 - 本轮处理：
   - 核心代码无需再改模型名；避免把已正确的低延迟链路误改成更贵、更慢的 Pro。
   - 已更新旧方案/交接文档中残留的 `deepseek-chat` 默认模型描述，统一指向 `deepseek-v4-flash`。
+
+## 本轮追加（2026-06-30：快捷指令三击触发 + 翻译默认指令）
+
+- 用户需求：按双击判断节奏只在时间窗内识别连点 3 次，新增“快捷指令”设置与默认翻译指令。
+- 本地核对：
+  - `main.swift` 已接入三连发路由：`VoiceShortcutTriggerPolicy` 支持 `.triple -> .beginQuickCommand`，`GlobalVoiceShortcutMonitor` 支持 `onTripleTrigger`，并按窗口时间(`doubleTriggerInterval`)判定 3 次连续点击。
+  - 新增 `VoiceShortcutQuickCommand` 与持久化存储；设置页 Input Tab 增加“快捷指令”单独一行（默认仅提供“快速翻译”）。
+  - 默认快捷指令执行逻辑为：在 `quick_shortcut_command` 会话里沿用普通 DeepSeek 链路（`deepseek-v4-flash` 模型）调用 `handleQuickShortcutCommand`，并附带上下文与固定翻译 prompt（中文 -> English；非中文 -> 中文）。
+- 验证：
+  - `swift test --disable-sandbox --quiet` 通过（154 tests）。
+  - `cd SettingsWeb && npm run build` 通过。
+- Git 状态：本地有上述新功能未推送改动；当前 `main` 与 `origin/main` 内容一致，无提交落后/超前，但工作区有未提交文件。下一步为提交并推送。
+
 - 已验证：
   - `strings /Applications/NexVoice.app/Contents/MacOS/NexVoiceApp` 能找到 `deepseek-v4-flash`。
   - 最近 DeepSeek 诊断日志显示多次 `model":"deepseek-v4-flash"` 且请求成功。

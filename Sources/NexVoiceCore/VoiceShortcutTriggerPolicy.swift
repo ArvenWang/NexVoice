@@ -9,6 +9,7 @@ public enum VoiceShortcutSessionState: Equatable, Sendable {
 public enum VoiceShortcutTriggerAction: Equatable, Sendable {
     case begin
     case beginContextQuestion
+    case beginQuickCommand
     case finish
     case ignore
 }
@@ -16,6 +17,7 @@ public enum VoiceShortcutTriggerAction: Equatable, Sendable {
 public enum VoiceShortcutTriggerKind: Equatable, Sendable {
     case single
     case double
+    case triple
 }
 
 public enum VoiceShortcutTriggerPolicy {
@@ -25,6 +27,9 @@ public enum VoiceShortcutTriggerPolicy {
     ) -> VoiceShortcutTriggerAction {
         if trigger == .double {
             return state == .idle ? .beginContextQuestion : .ignore
+        }
+        if trigger == .triple {
+            return state == .idle ? .beginQuickCommand : .ignore
         }
 
         switch state {

@@ -172,3 +172,15 @@ import Testing
         VoiceShortcutTriggerPolicy.action(for: .finishing, trigger: .double) == .ignore
     )
 }
+
+@Test func tripleShortcutStartsQuickCommandOnlyWhenIdle() {
+    #expect(
+        VoiceShortcutTriggerPolicy.action(for: .idle, trigger: .triple) == .beginQuickCommand
+    )
+    #expect(
+        VoiceShortcutTriggerPolicy.action(for: .running, trigger: .triple) == .ignore
+    )
+    #expect(
+        VoiceShortcutTriggerPolicy.action(for: .finishing, trigger: .triple) == .ignore
+    )
+}

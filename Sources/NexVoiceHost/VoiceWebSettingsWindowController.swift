@@ -167,6 +167,7 @@ final class VoiceWebSettingsWindowController: NSWindowController, NSWindowDelega
     private let scriptHandler: ScriptHandler
     private var webViewReady = false
     private var shortcut: VoiceShortcut
+    private var shortcutCommand: VoiceShortcutQuickCommand
     private var outputLanguage: VoiceOutputLanguage
     private var rewriteStyle: VoiceRewriteStyle
     private var selectedTab: Tab
@@ -180,6 +181,7 @@ final class VoiceWebSettingsWindowController: NSWindowController, NSWindowDelega
     private let workflowContextProvider: () -> VoiceRewriteContext
     private let canChangeInputSettings: () -> Bool
     private let onShortcutChanged: (VoiceShortcut) -> Void
+    private let onShortcutCommandChanged: (VoiceShortcutQuickCommand) -> Void
     private let onOutputLanguageChanged: (VoiceOutputLanguage) -> Void
     private let onRewriteStyleChanged: (VoiceRewriteStyle) -> Void
     private let workflowRewriteStyleProvider: (String, VoiceRewriteStyle) -> VoiceRewriteStyle
@@ -192,11 +194,13 @@ final class VoiceWebSettingsWindowController: NSWindowController, NSWindowDelega
     init(
         selectedTab: Tab,
         shortcut: VoiceShortcut,
+        shortcutCommand: VoiceShortcutQuickCommand,
         outputLanguage: VoiceOutputLanguage,
         rewriteStyle: VoiceRewriteStyle,
         workflowContextProvider: @escaping () -> VoiceRewriteContext,
         canChangeInputSettings: @escaping () -> Bool,
         onShortcutChanged: @escaping (VoiceShortcut) -> Void,
+        onShortcutCommandChanged: @escaping (VoiceShortcutQuickCommand) -> Void,
         onOutputLanguageChanged: @escaping (VoiceOutputLanguage) -> Void,
         onRewriteStyleChanged: @escaping (VoiceRewriteStyle) -> Void,
         workflowRewriteStyleProvider: @escaping (String, VoiceRewriteStyle) -> VoiceRewriteStyle,
@@ -233,11 +237,13 @@ final class VoiceWebSettingsWindowController: NSWindowController, NSWindowDelega
 
         self.selectedTab = selectedTab
         self.shortcut = shortcut
+        self.shortcutCommand = shortcutCommand
         self.outputLanguage = outputLanguage
         self.rewriteStyle = rewriteStyle
         self.workflowContextProvider = workflowContextProvider
         self.canChangeInputSettings = canChangeInputSettings
         self.onShortcutChanged = onShortcutChanged
+        self.onShortcutCommandChanged = onShortcutCommandChanged
         self.onOutputLanguageChanged = onOutputLanguageChanged
         self.onRewriteStyleChanged = onRewriteStyleChanged
         self.workflowRewriteStyleProvider = workflowRewriteStyleProvider
@@ -277,10 +283,12 @@ final class VoiceWebSettingsWindowController: NSWindowController, NSWindowDelega
 
     func update(
         shortcut: VoiceShortcut,
+        shortcutCommand: VoiceShortcutQuickCommand,
         outputLanguage: VoiceOutputLanguage,
         rewriteStyle: VoiceRewriteStyle
     ) {
         self.shortcut = shortcut
+        self.shortcutCommand = shortcutCommand
         self.outputLanguage = outputLanguage
         self.rewriteStyle = rewriteStyle
         refreshWorkflowIfNeeded()
@@ -480,6 +488,12 @@ final class VoiceWebSettingsWindowController: NSWindowController, NSWindowDelega
             guard let rawValue = message["style"] as? String,
                   let style = VoiceRewriteStyle(rawValue: rawValue) else { return }
             applyRewriteStyle(style)
+        case "setShortcutCommand":
+            guard let rawValue = message["command"] as? String,
+                  let command = VoiceShortcutQuickCommand(rawValue: rawValue) else { return }
+            shortcutCommand = command
+            onShortcutCommandChanged(command)
+            sendState()
         case "setWorkflow":
             guard let rawValue = message["workflow"] as? String,
                   let workflow = WorkflowOption(rawValue: rawValue) else { return }
@@ -643,6 +657,10 @@ final class VoiceWebSettingsWindowController: NSWindowController, NSWindowDelega
         return [
             "selectedTab": selectedTab.rawValue,
             "versionText": appVersionText(),
+            "shortcutCommand": [
+                "title": shortcutCommand.displayTitle,
+                "value": shortcutCommand.rawValue
+            ],
             "shortcut": [
                 "title": shortcut.displayTitle,
                 "recording": isRecordingShortcut

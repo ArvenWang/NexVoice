@@ -2,6 +2,7 @@ export type SettingsTab = "input" | "modes" | "workflow" | "dictionary" | "permi
 export type OutputLanguage = "simplifiedChinese" | "english";
 export type RewriteStyle = "standard" | "socialExpert" | "amplifiedSpokesperson" | "calm";
 export type DictionaryFilter = "all" | "automatic" | "manual";
+export type ShortcutCommand = "quick-translate";
 
 export type ModeMetric = {
   label: string;
@@ -42,6 +43,10 @@ export type PermissionItem = {
 export type SettingsState = {
   selectedTab: SettingsTab;
   versionText: string;
+  shortcutCommand: {
+    title: string;
+    value: ShortcutCommand;
+  };
   shortcut: {
     title: string;
     recording: boolean;
@@ -65,6 +70,7 @@ export type BridgeMessage =
   | { type: "resetShortcut" }
   | { type: "setOutputLanguage"; language: OutputLanguage }
   | { type: "setRewriteStyle"; style: RewriteStyle }
+  | { type: "setShortcutCommand"; command: ShortcutCommand }
   | { type: "setWorkflow"; workflow: string }
   | { type: "setWorkflowMode"; workflow: string; style: RewriteStyle }
   | { type: "setDictionaryFilter"; filter: DictionaryFilter }

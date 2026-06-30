@@ -20,9 +20,11 @@ final class GlobalVoiceShortcutMonitor {
     private var didTriggerLongPress = false
     private var longPressWorkItem: DispatchWorkItem?
     private var pendingShortPressWorkItem: DispatchWorkItem?
-    private var isSecondPressForDoubleTrigger = false
+    private var pendingShortPressWorkItemID = 0
+    private var shortPressTapCount = 0
     private var onTrigger: (() -> Void)?
     private var onDoubleTrigger: (() -> Void)?
+    private var onTripleTrigger: (() -> Void)?
     private var shouldDelayShortPressForDoubleTrigger: (() -> Bool)?
     private var onLongPress: (() -> Void)?
     private var onLongPressEnded: (() -> Void)?
@@ -34,6 +36,7 @@ final class GlobalVoiceShortcutMonitor {
         shortcut: VoiceShortcut,
         onTrigger: @escaping () -> Void,
         onDoubleTrigger: @escaping () -> Void,
+        onTripleTrigger: @escaping () -> Void,
         shouldDelayShortPressForDoubleTrigger: @escaping () -> Bool,
         onLongPress: @escaping () -> Void,
         onLongPressEnded: @escaping () -> Void,
@@ -43,6 +46,7 @@ final class GlobalVoiceShortcutMonitor {
         self.shortcut = shortcut
         self.onTrigger = onTrigger
         self.onDoubleTrigger = onDoubleTrigger
+        self.onTripleTrigger = onTripleTrigger
         self.shouldDelayShortPressForDoubleTrigger = shouldDelayShortPressForDoubleTrigger
         self.onLongPress = onLongPress
         self.onLongPressEnded = onLongPressEnded
@@ -91,8 +95,9 @@ final class GlobalVoiceShortcutMonitor {
         self.shortcut = shortcut
         pendingShortPressWorkItem?.cancel()
         pendingShortPressWorkItem = nil
+        pendingShortPressWorkItemID = 0
         isPressed = false
-        isSecondPressForDoubleTrigger = false
+        shortPressTapCount = 0
     }
 
     func setSuspended(_ suspended: Bool) {
@@ -102,9 +107,10 @@ final class GlobalVoiceShortcutMonitor {
             longPressWorkItem = nil
             pendingShortPressWorkItem?.cancel()
             pendingShortPressWorkItem = nil
+            pendingShortPressWorkItemID = 0
             isPressed = false
             didTriggerLongPress = false
-            isSecondPressForDoubleTrigger = false
+            shortPressTapCount = 0
             isCancelPressed = false
         }
     }
@@ -117,6 +123,7 @@ final class GlobalVoiceShortcutMonitor {
         removeMonitor(&localEventMonitor)
         onTrigger = nil
         onDoubleTrigger = nil
+        onTripleTrigger = nil
         shouldDelayShortPressForDoubleTrigger = nil
         onLongPress = nil
         onLongPressEnded = nil
@@ -125,9 +132,10 @@ final class GlobalVoiceShortcutMonitor {
         longPressWorkItem = nil
         pendingShortPressWorkItem?.cancel()
         pendingShortPressWorkItem = nil
+        pendingShortPressWorkItemID = 0
         isPressed = false
         didTriggerLongPress = false
-        isSecondPressForDoubleTrigger = false
+        shortPressTapCount = 0
         isCancelPressed = false
         usesRegisteredHotKey = false
         allowsEventMonitorFallback = false
@@ -314,17 +322,23 @@ final class GlobalVoiceShortcutMonitor {
         if pendingShortPressWorkItem != nil {
             pendingShortPressWorkItem?.cancel()
             pendingShortPressWorkItem = nil
-            isSecondPressForDoubleTrigger = true
+            pendingShortPressWorkItemID &+= 1
+            shortPressTapCount += 1
+            if shortPressTapCount > 3 {
+                shortPressTapCount = 3
+            }
         } else {
-            isSecondPressForDoubleTrigger = false
+            shortPressTapCount = 1
         }
         logShortcutEvent(
             "press_begin",
-            isSecondPressForDoubleTrigger: isSecondPressForDoubleTrigger,
+            isSecondPressForDoubleTrigger: shortPressTapCount > 1,
             didTriggerLongPress: didTriggerLongPress
         )
         longPressWorkItem?.cancel()
-        guard !isSecondPressForDoubleTrigger else { return }
+        if shortPressTapCount > 1 {
+            return
+        }
         let workItem = DispatchWorkItem { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self, self.isPressed, !self.didTriggerLongPress else { return }
@@ -342,44 +356,71 @@ final class GlobalVoiceShortcutMonitor {
         longPressWorkItem = nil
         let shouldTriggerShortPress = isPressed && !didTriggerLongPress
         let shouldEndLongPress = isPressed && didTriggerLongPress
+        let currentPressCount = max(shortPressTapCount, 1)
         isPressed = false
         didTriggerLongPress = false
-        let isDoubleTrigger = isSecondPressForDoubleTrigger
-        isSecondPressForDoubleTrigger = false
         logShortcutEvent(
             "press_end",
-            isSecondPressForDoubleTrigger: isDoubleTrigger,
-            triggerKind: shouldTriggerShortPress ? (isDoubleTrigger ? "double" : "single") : (shouldEndLongPress ? "long_end" : "none")
+            isSecondPressForDoubleTrigger: currentPressCount > 1,
+            triggerKind: shouldTriggerShortPress
+                ? (currentPressCount > 1 ? "double_or_more" : "single")
+                : (shouldEndLongPress ? "long_end" : "none")
         )
         if shouldTriggerShortPress {
-            handleShortPressEnded(isDoubleTrigger: isDoubleTrigger)
+            handleShortPressEnded(pressCount: currentPressCount)
         } else if shouldEndLongPress {
             logShortcutEvent("long_press_ended", triggerKind: "long_end")
             onLongPressEnded?()
         }
     }
 
-    private func handleShortPressEnded(isDoubleTrigger: Bool) {
-        if isDoubleTrigger {
-            logShortcutEvent("double_trigger_fired", triggerKind: "double")
-            onDoubleTrigger?()
+    private func handleShortPressEnded(pressCount: Int) {
+        if pressCount >= 3 {
+            shortPressTapCount = 0
+            logShortcutEvent("triple_trigger_fired", triggerKind: "triple")
+            onTripleTrigger?()
             return
         }
 
         guard shouldDelayShortPressForDoubleTrigger?() == true else {
-            logShortcutEvent("single_trigger_fired", shouldDelayShortPress: false, triggerKind: "single")
-            onTrigger?()
+            if pressCount >= 2 {
+                logShortcutEvent("double_trigger_fired", triggerKind: "double")
+                onDoubleTrigger?()
+            } else {
+                logShortcutEvent("single_trigger_fired", shouldDelayShortPress: false, triggerKind: "single")
+                onTrigger?()
+            }
+            shortPressTapCount = 0
             return
         }
 
-        pendingShortPressWorkItem?.cancel()
-        logShortcutEvent("single_trigger_deferred", shouldDelayShortPress: true, triggerKind: "single")
+        if pressCount == 2 {
+            logShortcutEvent("double_or_triple_candidate", shouldDelayShortPress: true, triggerKind: "double_or_more")
+        } else {
+            logShortcutEvent("single_trigger_deferred", shouldDelayShortPress: true, triggerKind: "single")
+        }
+        let scheduledShortPressWorkItemID = pendingShortPressWorkItemID &+ 1
+        pendingShortPressWorkItemID = scheduledShortPressWorkItemID
         let workItem = DispatchWorkItem { [weak self] in
             Task { @MainActor [weak self] in
-                guard let self, self.pendingShortPressWorkItem != nil else { return }
+                guard let self else { return }
+                guard self.pendingShortPressWorkItem != nil,
+                      scheduledShortPressWorkItemID == self.pendingShortPressWorkItemID else {
+                    return
+                }
                 self.pendingShortPressWorkItem = nil
-                self.logShortcutEvent("single_trigger_deferred_fired", shouldDelayShortPress: true, triggerKind: "single")
-                self.onTrigger?()
+                let finalPressCount = self.shortPressTapCount
+                self.shortPressTapCount = 0
+                if finalPressCount >= 3 {
+                    self.logShortcutEvent("triple_trigger_fired", triggerKind: "triple")
+                    self.onTripleTrigger?()
+                } else if finalPressCount == 2 {
+                    self.logShortcutEvent("double_trigger_deferred_fired", triggerKind: "double")
+                    self.onDoubleTrigger?()
+                } else {
+                    self.logShortcutEvent("single_trigger_deferred_fired", shouldDelayShortPress: true, triggerKind: "single")
+                    self.onTrigger?()
+                }
             }
         }
         pendingShortPressWorkItem = workItem

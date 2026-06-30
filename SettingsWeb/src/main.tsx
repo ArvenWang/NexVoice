@@ -14,6 +14,7 @@ import type {
   DictionaryTerm,
   PermissionItem,
   RewriteStyle,
+  ShortcutCommand,
   SettingsState,
   SettingsTab,
   WorkflowOption
@@ -40,6 +41,10 @@ const styleTitles: Record<RewriteStyle, string> = {
   socialExpert: "社交达人",
   amplifiedSpokesperson: "强化嘴替",
   calm: "冷静模式"
+};
+
+const shortcutCommandTitles: Record<ShortcutCommand, string> = {
+  "quick-translate": "快速翻译"
 };
 
 function App() {
@@ -186,6 +191,25 @@ function InputPage({ state }: { state: SettingsState }) {
             >
               English
             </button>
+          </div>
+        </div>
+        <div className="card-row interactive-row">
+          <div>
+            <h2>快捷指令</h2>
+            <p>按三击快捷键触发执行的默认指令。</p>
+          </div>
+          <div className="segmented compact-segmented">
+            {Object.keys(state.shortcutCommand).length > 0 &&
+              (Object.entries(shortcutCommandTitles) as Array<[ShortcutCommand, string]>).map(([command, title]) => (
+                <button
+                  key={command}
+                  type="button"
+                  className={state.shortcutCommand.value === command ? "active" : ""}
+                  onClick={() => postToNative({ type: "setShortcutCommand", command })}
+                >
+                  {title}
+                </button>
+              ))}
           </div>
         </div>
       </section>

@@ -168,6 +168,34 @@ final class DeepSeekFinalRewriteService: Sendable {
         )
     }
 
+    func handleQuickShortcutCommand(
+        sourceText: String,
+        command: VoiceShortcutQuickCommand,
+        outputLanguage: VoiceOutputLanguage = .simplifiedChinese,
+        style: VoiceRewriteStyle = .default,
+        context: VoiceRewriteContext = VoiceRewriteContext()
+    ) async throws -> String {
+        let sourceText = sourceText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sourceText.isEmpty else { throw DeepSeekFinalRewriteError.emptyRewrite }
+        let promptPlan = VoiceRewritePromptPolicy.quickShortcutCommandPromptPlan(
+            sourceText: sourceText,
+            command: command,
+            context: context
+        )
+
+        return try await complete(
+            promptPlan: promptPlan,
+            operation: "quick_shortcut_command",
+            outputLanguage: outputLanguage,
+            style: style,
+            selectedTextCharacters: nil,
+            instructionCharacters: sourceText.count,
+            context: context,
+            temperature: style.rewriteTemperature,
+            sourceText: sourceText
+        )
+    }
+
     private func complete(
         promptPlan: VoiceRewritePromptPlan,
         operation: String,
