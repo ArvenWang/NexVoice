@@ -77,7 +77,7 @@ public enum VoiceWaveformDisplayPolicy {
         let centerRow = CGFloat(gridRowCount - 1) / 2
         let voiceInput = clamp(amplitude, min: 0, max: 1)
         // 低音量阶段必须压住亮度，把主要对比留给正常说话时的中心爆亮。
-        let voiceLevel = smoothstep(edge0: 0.14, edge1: 0.56, value: voiceInput)
+        let voiceLevel = voiceMotionLevel(for: voiceInput)
         let responseLevel = pow(voiceLevel, 0.58)
 
         return (0..<(gridColumnCount * gridRowCount)).map { index in
@@ -140,6 +140,10 @@ public enum VoiceWaveformDisplayPolicy {
                 distanceFromCenter: horizontalDistance
             )
         }
+    }
+
+    public static func voiceMotionLevel(for amplitude: CGFloat) -> CGFloat {
+        smoothstep(edge0: 0.14, edge1: 0.56, value: clamp(amplitude, min: 0, max: 1))
     }
 }
 

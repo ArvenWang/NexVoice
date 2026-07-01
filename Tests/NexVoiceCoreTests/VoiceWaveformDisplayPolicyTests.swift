@@ -133,6 +133,13 @@ import Testing
     #expect(visibleCells.count < cellCount)
 }
 
+@Test func waveformMotionFreezesBelowVoiceThreshold() {
+    #expect(VoiceWaveformDisplayPolicy.voiceMotionLevel(for: 0) == 0)
+    #expect(VoiceWaveformDisplayPolicy.voiceMotionLevel(for: 0.10) == 0)
+    #expect(VoiceWaveformDisplayPolicy.voiceMotionLevel(for: 0.34) > 0.45)
+    #expect(VoiceWaveformDisplayPolicy.voiceMotionLevel(for: 0.56) == 1)
+}
+
 @Test func quietAudioCreatesVisibleWaveMovement() {
     let quietCells = VoiceWaveformDisplayPolicy.waveformGridCells(
         in: CGRect(x: 0, y: 0, width: 236, height: 28),

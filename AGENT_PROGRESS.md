@@ -13,6 +13,32 @@
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
+## 本轮追加（2026-07-02：静音冻结噪波相位与说话中心近白高亮）
+
+- 本轮结论：
+  - 频闪根因已定位：无声音时 `VoiceWaveformView` 仍每 1/30 秒推进 `phase`，静音噪波不断刷新，导致肉眼看到不说话时仍有频闪。
+  - 已改为：低于声音阈值时不再推进噪波相位，静音状态保持静态低亮蓝紫纹理；正常说话后才恢复噪波运动和中心扩散。
+  - 说话时高亮端已从偏紫的 `RGB(0.75, 0.55, 1.0)` 提升到接近白蓝紫的 `RGB(0.973, 0.941, 1.0)`，中心亮度会更接近白色。
+- 已执行：
+  - `VoiceWaveformDisplayPolicy`：新增 `voiceMotionLevel(for:)`，统一声音运动阈值；低于 `0.14` 的输入 motion level 为 0。
+  - `VoiceCaptionPanelController`：静音/低噪声时冻结 `phase`；高亮色映射增强到近白蓝紫。
+  - `VoiceWaveformDisplayPolicyTests`：新增 `waveformMotionFreezesBelowVoiceThreshold`，防止静音状态重新推进噪波动画。
+  - 运行 `./scripts/bump_version.sh`，版本从 `0.1.74 (75)` 升到 `0.1.75 (76)`。
+  - 已构建并安装带 API 配置的 `/Applications/NexVoice.app`，旧版备份为 `dist/install-backups/NexVoice-20260702-023750-pre-waveform-freeze-idle-bright-center.app`。
+  - 已重启安装版 App，当前进程 PID `19239`。
+  - 已生成带 API 配置的分享 DMG：`dist/NexVoice-0.1.75-build76-freeze-idle-bright-center-embedded-keys-20260702.dmg`。
+  - DMG SHA256：`7f9b50fedbdffaad8d377569d71f1d870ed49e5b98fee05d2058f92ef160dd6f`。
+- 已验证：
+  - `swift test --disable-sandbox --filter VoiceWaveformDisplayPolicyTests` 通过（18 tests）。
+  - `swift test --disable-sandbox --quiet` 通过（163 tests）。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=2 dist/NexVoice.app` 通过。
+  - `codesign --verify --deep --strict --verbose=2 /Applications/NexVoice.app` 通过。
+  - `plutil -lint dist/NexVoice.app/Contents/Info.plist /Applications/NexVoice.app/Contents/Info.plist` 通过。
+  - `dist/NexVoice.app` 和 `/Applications/NexVoice.app` 内的 `DeepSeek.json`、`TencentCloudASR.json` 嵌入配置存在且非空。
+  - `hdiutil verify dist/NexVoice-0.1.75-build76-freeze-idle-bright-center-embedded-keys-20260702.dmg` 通过。
+  - 已挂载 DMG 验证根目录包含 `NexVoice.app` 和 `Applications` 快捷入口，且 DMG 内 App 签名通过、嵌入配置存在且非空。
+
 ## 本轮追加（2026-07-02：蓝紫色波形与静音单像素防频闪）
 
 - 本轮结论：
