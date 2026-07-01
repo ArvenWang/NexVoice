@@ -71,7 +71,7 @@ import Testing
     #expect(Set(cells.map { round($0.intensity * 100) / 100 }).count > 12)
 }
 
-@Test func silentWaveformKeepsVisibleAmbientNoise() {
+@Test func silentWaveformHasNoDarkPixelBase() {
     let idleCells = VoiceWaveformDisplayPolicy.waveformGridCells(
         in: CGRect(x: 0, y: 0, width: 236, height: 28),
         amplitude: 0,
@@ -85,8 +85,9 @@ import Testing
         isActive: true
     )
 
-    #expect((idleCells.map(\.intensity).max() ?? 0) > 0.02)
+    #expect((idleCells.map(\.intensity).max() ?? 1) == 0)
     #expect((activeCells.map(\.intensity).max() ?? 0) > (idleCells.map(\.intensity).max() ?? 0))
+    #expect((activeCells.map(\.intensity).max() ?? 1) < 0.04)
 }
 
 @Test func quietAudioCreatesVisibleWaveMovement() {
@@ -108,16 +109,16 @@ import Testing
     #expect(quietBrightest - idleBrightest >= 0.08)
 }
 
-@Test func silentActiveWaveformKeepsFlowingNoiseMotion() {
+@Test func quietActiveWaveformKeepsFlowingNoiseMotion() {
     let firstFrame = VoiceWaveformDisplayPolicy.waveformGridCells(
         in: CGRect(x: 0, y: 0, width: 236, height: 28),
-        amplitude: 0,
+        amplitude: 0.12,
         phase: 0,
         isActive: true
     )
     let laterFrame = VoiceWaveformDisplayPolicy.waveformGridCells(
         in: CGRect(x: 0, y: 0, width: 236, height: 28),
-        amplitude: 0,
+        amplitude: 0.12,
         phase: 3.4,
         isActive: true
     )
@@ -126,7 +127,7 @@ import Testing
     #expect(Set(firstFrame.map { round($0.intensity * 100) / 100 }).count > 6)
 }
 
-@Test func louderAudioBrightensCenterWithoutRevealingOuterWidth() {
+@Test func louderAudioBrightensCenterWithNoiseFalloff() {
     let quietCells = VoiceWaveformDisplayPolicy.waveformGridCells(
         in: CGRect(x: 0, y: 0, width: 236, height: 28),
         amplitude: 0,
@@ -140,8 +141,8 @@ import Testing
         isActive: true
     )
 
-    #expect(averageCenterIntensity(loudCells) > averageCenterIntensity(quietCells) + 0.25)
-    #expect(averageOuterIntensity(loudCells) < averageOuterIntensity(quietCells) + 0.08)
+    #expect(averageCenterIntensity(loudCells) > averageCenterIntensity(quietCells) + 0.38)
+    #expect(averageOuterIntensity(loudCells) < averageCenterIntensity(loudCells) * 0.35)
 }
 
 @Test func waveformEnergyStaysFocusedNearCenter() {
@@ -155,16 +156,15 @@ import Testing
     #expect(averageCenterIntensity(cells) > averageOuterIntensity(cells) * 3)
 }
 
-@Test func waveformKeepsFullWidthDarkBase() {
-    let idleCells = VoiceWaveformDisplayPolicy.waveformGridCells(
+@Test func waveformFormsSpindleRatherThanUniformRows() {
+    let cells = VoiceWaveformDisplayPolicy.waveformGridCells(
         in: CGRect(x: 0, y: 0, width: 236, height: 28),
-        amplitude: 0,
+        amplitude: 0.58,
         phase: 0.8,
         isActive: true
     )
 
-    let edgeCells = idleCells.filter { $0.distanceFromCenter > 0.92 }
-    #expect((edgeCells.map(\.intensity).min() ?? 0) >= 0.045)
+    #expect(averageMiddleRowIntensity(cells) > averageOuterRowIntensity(cells) * 1.45)
 }
 
 @Test func waveformNoiseAvoidsDirectionalSweep() {
@@ -182,6 +182,19 @@ import Testing
     #expect(signChangeCount(in: centerRowCells) >= 10)
 }
 
+@Test func waveformNoiseLeavesSparseSideHighlights() {
+    let cells = VoiceWaveformDisplayPolicy.waveformGridCells(
+        in: CGRect(x: 0, y: 0, width: 236, height: 28),
+        amplitude: 0.72,
+        phase: 2.4,
+        isActive: true
+    )
+    let sideCells = cells.filter { $0.distanceFromCenter > 0.56 }
+
+    #expect(sideCells.contains { $0.intensity > 0.08 })
+    #expect(sideCells.filter { $0.intensity > 0.08 }.count < sideCells.count / 3)
+}
+
 @Test func waveformFeedbackHidesImmediatelyAfterInsertion() {
     #expect(VoiceWaveformDisplayPolicy.insertedTextHideDelay == 0)
 }
@@ -196,6 +209,18 @@ private func averageOuterIntensity(_ cells: [VoiceWaveformGridCell]) -> CGFloat 
     let outerCells = cells.filter { $0.distanceFromCenter > 0.55 }
     let total = outerCells.reduce(CGFloat(0)) { $0 + $1.intensity }
     return total / CGFloat(max(outerCells.count, 1))
+}
+
+private func averageMiddleRowIntensity(_ cells: [VoiceWaveformGridCell]) -> CGFloat {
+    let middleRowCells = cells.filter { abs($0.rect.midY - 14) < 3 }
+    let total = middleRowCells.reduce(CGFloat(0)) { $0 + $1.intensity }
+    return total / CGFloat(max(middleRowCells.count, 1))
+}
+
+private func averageOuterRowIntensity(_ cells: [VoiceWaveformGridCell]) -> CGFloat {
+    let outerRowCells = cells.filter { abs($0.rect.midY - 14) > 8 }
+    let total = outerRowCells.reduce(CGFloat(0)) { $0 + $1.intensity }
+    return total / CGFloat(max(outerRowCells.count, 1))
 }
 
 private func signChangeCount(in values: [CGFloat]) -> Int {

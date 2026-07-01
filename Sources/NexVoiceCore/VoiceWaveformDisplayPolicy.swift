@@ -76,6 +76,7 @@ public enum VoiceWaveformDisplayPolicy {
         let centerColumn = CGFloat(gridColumnCount - 1) / 2
         let centerRow = CGFloat(gridRowCount - 1) / 2
         let visualAmplitude = pow(clamp(amplitude, min: 0, max: 1), 0.62)
+        let voiceLevel = smoothstep(edge0: 0.05, edge1: 0.42, value: visualAmplitude)
 
         return (0..<(gridColumnCount * gridRowCount)).map { index in
             let column = index % gridColumnCount
@@ -85,26 +86,41 @@ public enum VoiceWaveformDisplayPolicy {
             let horizontalDistance = abs(columnPosition - centerColumn) / max(centerColumn, 1)
             let verticalDistance = abs(rowPosition - centerRow) / max(centerRow, 1)
 
-            let centerGlow = exp(-pow(horizontalDistance / 0.34, 2.15))
-            let rowFalloff = 1 - verticalDistance * 0.30
             let seedA = seededNoise(column: column, row: row)
             let seedB = seededNoise(column: row + 31, row: column + 17)
             let seedC = seededNoise(column: column + 53, row: row + 89)
-            let noiseA = normalizedSine(phase * (0.75 + seedA * 1.85) + seedA * .pi * 2)
-            let noiseB = normalizedSine(phase * (1.45 + seedB * 2.10) + seedB * .pi * 2)
-            let noiseC = normalizedSine(phase * (2.65 + seedC * 1.35) + seedC * .pi * 2)
-            let noise = noiseA * 0.44 + noiseB * 0.36 + noiseC * 0.20
-            let baseEnergy = (isActive ? 0.060 : 0.040)
-                + noise * (isActive ? 0.055 : 0.020)
-            let centerEnergy = centerGlow
-                * (0.060 + visualAmplitude * 0.760)
-                * (0.70 + noise * 0.62)
-            let sparkleEnergy = pow(noise, 5.0)
-                * (0.030 + visualAmplitude * 0.145)
-                * (0.36 + centerGlow * 0.64)
+            let rowWeight = 1 - verticalDistance * 0.52
+            let spindleWidth = 0.18 + rowWeight * 0.58
+            let spindle = exp(-pow(horizontalDistance / max(spindleWidth, 0.12), 2.35))
+                * rowWeight
+            let centerCore = exp(-pow(horizontalDistance / 0.26, 2.1))
+                * (0.55 + rowWeight * 0.45)
+
+            let noiseA = normalizedSine(phase * (0.90 + seedA * 2.60) + seedA * .pi * 2)
+            let noiseB = normalizedSine(phase * (1.85 + seedB * 2.40) + seedB * .pi * 2)
+            let noiseC = normalizedSine(phase * (3.10 + seedC * 2.10) + seedC * .pi * 2)
+            let noise = clamp(noiseA * 0.36 + noiseB * 0.34 + noiseC * 0.30, min: 0, max: 1)
+            let sparseNoise = smoothstep(
+                edge0: 0.42 - voiceLevel * 0.13 - spindle * 0.10,
+                edge1: 0.96,
+                value: noise
+            )
+            let centerEnergy = centerCore
+                * voiceLevel
+                * (0.38 + noise * 0.92)
+            let spindleEnergy = spindle
+                * voiceLevel
+                * sparseNoise
+                * (0.18 + noise * 0.78)
+            let edgeSparkle = sparseNoise
+                * voiceLevel
+                * (1 - centerCore)
+                * 0.11
+                * (0.35 + noise * 0.65)
+            let idleTrace = isActive ? max(0, noise - 0.88) * 0.025 : 0
             let intensity = clamp(
-                (baseEnergy + centerEnergy + sparkleEnergy) * rowFalloff,
-                min: isActive ? 0.045 : 0.030,
+                centerEnergy + spindleEnergy + edgeSparkle + idleTrace,
+                min: 0,
                 max: 1
             )
             let x = startX + columnPosition * (dotSize + dotSpacing)
@@ -130,6 +146,12 @@ private func clamp(_ value: CGFloat, min lowerBound: CGFloat, max upperBound: CG
 
 private func normalizedSine(_ value: CGFloat) -> CGFloat {
     (sin(value) + 1) / 2
+}
+
+private func smoothstep(edge0: CGFloat, edge1: CGFloat, value: CGFloat) -> CGFloat {
+    guard edge0 != edge1 else { return value >= edge1 ? 1 : 0 }
+    let x = clamp((value - edge0) / (edge1 - edge0), min: 0, max: 1)
+    return x * x * (3 - 2 * x)
 }
 
 private func seededNoise(column: Int, row: Int) -> CGFloat {
