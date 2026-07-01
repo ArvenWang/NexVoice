@@ -135,9 +135,10 @@ import Testing
 
 @Test func waveformMotionFreezesBelowVoiceThreshold() {
     #expect(VoiceWaveformDisplayPolicy.voiceMotionLevel(for: 0) == 0)
-    #expect(VoiceWaveformDisplayPolicy.voiceMotionLevel(for: 0.10) == 0)
-    #expect(VoiceWaveformDisplayPolicy.voiceMotionLevel(for: 0.34) > 0.45)
-    #expect(VoiceWaveformDisplayPolicy.voiceMotionLevel(for: 0.56) == 1)
+    #expect(VoiceWaveformDisplayPolicy.voiceMotionLevel(for: 0.18) == 0)
+    #expect(VoiceWaveformDisplayPolicy.voiceMotionLevel(for: 0.34) > 0.10)
+    #expect(VoiceWaveformDisplayPolicy.voiceMotionLevel(for: 0.62) == 1)
+    #expect(VoiceWaveformDisplayPolicy.voiceResponseLevel(for: 0.34) > VoiceWaveformDisplayPolicy.voiceMotionLevel(for: 0.34))
 }
 
 @Test func quietAudioCreatesVisibleWaveMovement() {
@@ -194,6 +195,18 @@ import Testing
 
     #expect(averageCenterIntensity(loudCells) > averageCenterIntensity(quietCells) + 0.44)
     #expect(averageOuterIntensity(loudCells) < averageCenterIntensity(loudCells) * 0.35)
+}
+
+@Test func loudAudioKeepsNearWhiteCoreCompact() {
+    let cells = VoiceWaveformDisplayPolicy.waveformGridCells(
+        in: CGRect(x: 0, y: 0, width: 236, height: 28),
+        amplitude: 0.82,
+        phase: 0,
+        isActive: true
+    )
+
+    #expect(brightCellCount(cells, threshold: 0.88) > 0)
+    #expect(brightCellCount(cells, threshold: 0.88) < cells.count / 5)
 }
 
 @Test func normalVoiceExpandsBrightRegionBeyondIdleShape() {

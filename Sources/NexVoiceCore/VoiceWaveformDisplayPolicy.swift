@@ -77,7 +77,7 @@ public enum VoiceWaveformDisplayPolicy {
         let centerRow = CGFloat(gridRowCount - 1) / 2
         let voiceInput = clamp(amplitude, min: 0, max: 1)
         // 低音量阶段必须压住亮度，把主要对比留给正常说话时的中心爆亮。
-        let voiceLevel = voiceMotionLevel(for: voiceInput)
+        let voiceLevel = voiceResponseLevel(for: voiceInput)
         let responseLevel = pow(voiceLevel, 0.58)
 
         return (0..<(gridColumnCount * gridRowCount)).map { index in
@@ -96,7 +96,7 @@ public enum VoiceWaveformDisplayPolicy {
             let spindle = exp(-pow(horizontalDistance / max(spindleWidth, 0.12), 2.35))
                 * rowWeight
             let expandedSpindle = pow(spindle, 1.25 - responseLevel * 0.45)
-            let centerCore = exp(-pow(horizontalDistance / 0.26, 2.1))
+            let centerCore = exp(-pow(horizontalDistance / 0.18, 2.1))
                 * (0.55 + rowWeight * 0.45)
 
             let noiseA = normalizedSine(phase * (0.90 + seedA * 2.60) + seedA * .pi * 2)
@@ -117,11 +117,11 @@ public enum VoiceWaveformDisplayPolicy {
                 * (0.78 + noise * 0.22)
             let centerEnergy = centerCore
                 * responseLevel
-                * (0.50 + noise * 1.42)
+                * (0.40 + noise * 1.14)
             let spindleEnergy = expandedSpindle
                 * responseLevel
                 * sparseNoise
-                * (0.24 + voiceWidth + noise * 1.08)
+                * (0.24 + voiceWidth + noise * 0.84)
             let edgeSparkle = sparseNoise
                 * responseLevel
                 * (1 - centerCore)
@@ -143,6 +143,10 @@ public enum VoiceWaveformDisplayPolicy {
     }
 
     public static func voiceMotionLevel(for amplitude: CGFloat) -> CGFloat {
+        smoothstep(edge0: 0.24, edge1: 0.62, value: clamp(amplitude, min: 0, max: 1))
+    }
+
+    public static func voiceResponseLevel(for amplitude: CGFloat) -> CGFloat {
         smoothstep(edge0: 0.14, edge1: 0.56, value: clamp(amplitude, min: 0, max: 1))
     }
 }

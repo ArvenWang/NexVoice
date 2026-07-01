@@ -13,6 +13,33 @@
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
+## 本轮追加（2026-07-02：收窄近白核心并提高安静运动门槛）
+
+- 本轮结论：
+  - 已按用户反馈收窄近白亮区：最亮点仍可接近白色，但不再让大量中等强度格子一起发白。
+  - 安静/底噪抖动根因进一步定位：smoothed amplitude 在安静环境或尾音衰减时可能停在低阈值附近，之前仍会触发 motion；已把“亮度响应”和“噪波运动触发”拆开。
+  - 现在 `0.18` 这类安静底噪不会推动噪波运动，正常说话才逐步恢复运动；亮度仍可按语音强度反馈。
+- 已执行：
+  - `VoiceWaveformDisplayPolicy`：新增独立 `voiceResponseLevel(for:)`，保留亮度响应；`voiceMotionLevel(for:)` 阈值提高到 `0.24...0.62`，避免安静底噪触发抖动。
+  - `VoiceWaveformDisplayPolicy`：中心核心从 `0.26` 收窄到 `0.18`，并略降中心/纺锥噪波能量，减少近白面积。
+  - `VoiceCaptionPanelController`：高亮颜色曲线改得更陡，中等强度保持蓝紫，只有高强度接近白蓝紫。
+  - `VoiceWaveformDisplayPolicyTests`：新增 `loudAudioKeepsNearWhiteCoreCompact`，防止大音量下整片接近白。
+  - 运行 `./scripts/bump_version.sh`，版本从 `0.1.75 (76)` 升到 `0.1.76 (77)`。
+  - 已构建并安装带 API 配置的 `/Applications/NexVoice.app`，旧版备份为 `dist/install-backups/NexVoice-20260702-024520-pre-waveform-compact-highlight-quiet-motion.app`。
+  - 已重启安装版 App，当前进程 PID `30885`。
+  - 已生成带 API 配置的分享 DMG：`dist/NexVoice-0.1.76-build77-compact-highlight-quiet-motion-embedded-keys-20260702.dmg`。
+  - DMG SHA256：`f49e6739e9af1a4f4813d0370e30c72f23925aa983fe3854cf565a3ed4496dbb`。
+- 已验证：
+  - `swift test --disable-sandbox --filter VoiceWaveformDisplayPolicyTests` 通过（19 tests）。
+  - `swift test --disable-sandbox --quiet` 通过（164 tests）。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=2 dist/NexVoice.app` 通过。
+  - `codesign --verify --deep --strict --verbose=2 /Applications/NexVoice.app` 通过。
+  - `plutil -lint dist/NexVoice.app/Contents/Info.plist /Applications/NexVoice.app/Contents/Info.plist` 通过。
+  - `dist/NexVoice.app` 和 `/Applications/NexVoice.app` 内的 `DeepSeek.json`、`TencentCloudASR.json` 嵌入配置存在且非空。
+  - `hdiutil verify dist/NexVoice-0.1.76-build77-compact-highlight-quiet-motion-embedded-keys-20260702.dmg` 通过。
+  - 已挂载 DMG 验证根目录包含 `NexVoice.app` 和 `Applications` 快捷入口，且 DMG 内 App 签名通过、嵌入配置存在且非空。
+
 ## 本轮追加（2026-07-02：静音冻结噪波相位与说话中心近白高亮）
 
 - 本轮结论：

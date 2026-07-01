@@ -1128,7 +1128,7 @@ private final class VoiceWaveformView: NSView {
     }
 
     private func color(for cell: VoiceWaveformGridCell) -> NSColor {
-        let whiteMix = min(0.99, pow(max(0, cell.intensity), 0.70) * 1.12)
+        let whiteMix = min(0.99, pow(max(0, cell.intensity), 1.18) * 1.14)
         let red = 0.31 + whiteMix * 0.67
         let green = 0.09 + whiteMix * 0.86
         let blue = 1.00
