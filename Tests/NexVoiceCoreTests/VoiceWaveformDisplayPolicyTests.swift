@@ -87,7 +87,7 @@ import Testing
 
     #expect((idleCells.map(\.intensity).max() ?? 1) == 0)
     #expect((activeCells.map(\.intensity).max() ?? 0) > (idleCells.map(\.intensity).max() ?? 0))
-    #expect((activeCells.map(\.intensity).max() ?? 1) < 0.04)
+    #expect((activeCells.map(\.intensity).max() ?? 1) < 0.055)
 }
 
 @Test func silentActiveWaveformAvoidsStrobeDropouts() {
@@ -106,7 +106,7 @@ import Testing
 
     #expect(totalIntensity(nextFrame) > totalIntensity(firstFrame) * 0.94)
     #expect(totalIntensity(nextFrame) < totalIntensity(firstFrame) * 1.06)
-    #expect((firstFrame.map(\.intensity).max() ?? 1) < 0.04)
+    #expect((firstFrame.map(\.intensity).max() ?? 1) < 0.055)
 }
 
 @Test func silentActiveWaveformKeepsIndividualPixelsStable() {
@@ -133,12 +133,15 @@ import Testing
     #expect(visibleCells.count < cellCount)
 }
 
-@Test func waveformMotionFreezesBelowVoiceThreshold() {
+@Test func waveformMotionKeepsIdleDriftBelowVoiceSpeed() {
     #expect(VoiceWaveformDisplayPolicy.voiceMotionLevel(for: 0) == 0)
     #expect(VoiceWaveformDisplayPolicy.voiceMotionLevel(for: 0.18) == 0)
     #expect(VoiceWaveformDisplayPolicy.voiceMotionLevel(for: 0.34) > 0.10)
     #expect(VoiceWaveformDisplayPolicy.voiceMotionLevel(for: 0.62) == 1)
     #expect(VoiceWaveformDisplayPolicy.voiceResponseLevel(for: 0.34) > VoiceWaveformDisplayPolicy.voiceMotionLevel(for: 0.34))
+    #expect(VoiceWaveformDisplayPolicy.phaseIncrement(for: 0) > 0)
+    #expect(VoiceWaveformDisplayPolicy.phaseIncrement(for: 0.18) == VoiceWaveformDisplayPolicy.phaseIncrement(for: 0))
+    #expect(VoiceWaveformDisplayPolicy.phaseIncrement(for: 0.52) > VoiceWaveformDisplayPolicy.phaseIncrement(for: 0) * 20)
 }
 
 @Test func quietAudioCreatesVisibleWaveMovement() {

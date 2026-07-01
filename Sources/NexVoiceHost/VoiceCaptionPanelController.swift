@@ -1143,10 +1143,7 @@ private final class VoiceWaveformView: NSView {
         let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                let motionLevel = VoiceWaveformDisplayPolicy.voiceMotionLevel(for: self.amplitude)
-                if motionLevel > 0 {
-                    self.phase += 0.030 * motionLevel + min(0.27, self.amplitude * 0.30)
-                }
+                self.phase += VoiceWaveformDisplayPolicy.phaseIncrement(for: self.amplitude)
                 self.amplitude = max(0, self.amplitude * 0.955)
                 self.needsDisplay = true
             }

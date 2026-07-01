@@ -13,6 +13,35 @@
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
+## 本轮追加（2026-07-02：静音纺锥轮廓与说话衔接优化）
+
+- 本轮结论：
+  - 已按用户反馈提高不说话时的底限：静音状态现在保留低亮度纺锥形轮廓，不再几乎全黑。
+  - 静音轮廓不是全格子常亮：通过稳定随机遮罩控制可见比例，采样约 136/220 个格子超过低可见阈值，约 123/220 个格子超过更明显阈值。
+  - 静音噪波恢复为极慢运动，但只做小幅亮度扰动，避免之前那种单个格子忽然消失造成的频闪。
+  - 说话越强，静音底层越退让，避免说话时外侧被整体抬亮；说话高亮核心和蓝紫层次保持上一版方向。
+- 已执行：
+  - `VoiceWaveformDisplayPolicy`：新增稳定 `ambientPresence` 遮罩，静音底层从近不可见提升到可见轮廓，并把噪波扰动压到 12%。
+  - `VoiceWaveformDisplayPolicy`：新增 `phaseIncrement(for:)`，静音时使用极慢 drift，正常说话时才明显加速。
+  - `VoiceWaveformDisplayPolicy`：说话时按 `responseLevel` 逐步降低静音底层权重，避免外侧亮点过多。
+  - `VoiceCaptionPanelController`：相位推进改为统一使用 `phaseIncrement(for:)`。
+  - `VoiceWaveformDisplayPolicyTests`：更新静音运动测试为“慢速、有轮廓、不频闪、说话更快”的标准。
+  - 运行 `./scripts/bump_version.sh`，版本从 `0.1.76 (77)` 升到 `0.1.77 (78)`。
+  - 已构建并安装带 API 配置的 `/Applications/NexVoice.app`，旧版备份为 `dist/install-backups/NexVoice-20260702-025305-pre-waveform-idle-contour-bridge.app`。
+  - 已重启安装版 App，当前进程 PID `56281`。
+  - 已生成带 API 配置的分享 DMG：`dist/NexVoice-0.1.77-build78-idle-contour-bridge-embedded-keys-20260702.dmg`。
+  - DMG SHA256：`8e11ae64b11be13e33bd9e99accd38ccf583fb62026169261ea3e0a94e0a9586`。
+- 已验证：
+  - `swift test --disable-sandbox --filter VoiceWaveformDisplayPolicyTests` 通过（19 tests）。
+  - `swift test --disable-sandbox --quiet` 通过（164 tests）。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=2 dist/NexVoice.app` 通过。
+  - `codesign --verify --deep --strict --verbose=2 /Applications/NexVoice.app` 通过。
+  - `plutil -lint dist/NexVoice.app/Contents/Info.plist /Applications/NexVoice.app/Contents/Info.plist` 通过。
+  - `dist/NexVoice.app` 和 `/Applications/NexVoice.app` 内的 `DeepSeek.json`、`TencentCloudASR.json` 嵌入配置存在且非空。
+  - `hdiutil verify dist/NexVoice-0.1.77-build78-idle-contour-bridge-embedded-keys-20260702.dmg` 通过。
+  - 已挂载 DMG 验证根目录包含 `NexVoice.app` 和 `Applications` 快捷入口，且 DMG 内 App 签名通过、嵌入配置存在且非空。
+
 ## 本轮追加（2026-07-02：收窄近白核心并提高安静运动门槛）
 
 - 本轮结论：
