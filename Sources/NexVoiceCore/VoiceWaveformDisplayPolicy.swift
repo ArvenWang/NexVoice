@@ -75,8 +75,9 @@ public enum VoiceWaveformDisplayPolicy {
         let startY = bounds.midY - totalHeight / 2
         let centerColumn = CGFloat(gridColumnCount - 1) / 2
         let centerRow = CGFloat(gridRowCount - 1) / 2
-        let visualAmplitude = pow(clamp(amplitude, min: 0, max: 1), 0.62)
-        let voiceLevel = smoothstep(edge0: 0.05, edge1: 0.42, value: visualAmplitude)
+        let visualAmplitude = pow(clamp(amplitude, min: 0, max: 1), 0.48)
+        let voiceLevel = smoothstep(edge0: 0.08, edge1: 0.34, value: visualAmplitude)
+        let responseLevel = pow(voiceLevel, 0.58)
 
         return (0..<(gridColumnCount * gridRowCount)).map { index in
             let column = index % gridColumnCount
@@ -100,24 +101,25 @@ public enum VoiceWaveformDisplayPolicy {
             let noiseB = normalizedSine(phase * (1.85 + seedB * 2.40) + seedB * .pi * 2)
             let noiseC = normalizedSine(phase * (3.10 + seedC * 2.10) + seedC * .pi * 2)
             let noise = clamp(noiseA * 0.36 + noiseB * 0.34 + noiseC * 0.30, min: 0, max: 1)
+            let voiceWidth = 0.22 + responseLevel * 0.34
             let sparseNoise = smoothstep(
-                edge0: 0.42 - voiceLevel * 0.13 - spindle * 0.10,
+                edge0: 0.61 - responseLevel * 0.31 - spindle * 0.15,
                 edge1: 0.96,
                 value: noise
             )
             let centerEnergy = centerCore
-                * voiceLevel
-                * (0.38 + noise * 0.92)
+                * responseLevel
+                * (0.34 + noise * 1.24)
             let spindleEnergy = spindle
-                * voiceLevel
+                * responseLevel
                 * sparseNoise
-                * (0.18 + noise * 0.78)
+                * (0.18 + voiceWidth + noise * 0.96)
             let edgeSparkle = sparseNoise
-                * voiceLevel
+                * responseLevel
                 * (1 - centerCore)
-                * 0.11
+                * 0.10
                 * (0.35 + noise * 0.65)
-            let idleTrace = isActive ? max(0, noise - 0.88) * 0.025 : 0
+            let idleTrace = isActive ? max(0, noise - 0.94) * 0.010 : 0
             let intensity = clamp(
                 centerEnergy + spindleEnergy + edgeSparkle + idleTrace,
                 min: 0,
