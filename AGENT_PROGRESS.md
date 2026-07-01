@@ -26,6 +26,8 @@
   - 运行 `./scripts/bump_version.sh`，版本从 `0.1.71 (72)` 升到 `0.1.72 (73)`。
   - 已构建并安装带 API 配置的 `/Applications/NexVoice.app`，旧版备份为 `dist/install-backups/NexVoice-20260702-021925-pre-waveform-speaking-glow.app`。
   - 已重启安装版 App，当前进程 PID `88639`。
+  - 已生成带 API 配置的分享 DMG：`dist/NexVoice-0.1.72-build73-speaking-glow-embedded-keys-20260702.dmg`。
+  - DMG SHA256：`abdfb343db0761522c230ca403057ff6ea430f38be3019fb9c3c404386e159ee`。
 - 已验证：
   - `swift test --disable-sandbox --filter VoiceWaveformDisplayPolicyTests` 通过（15 tests）。
   - `swift test --disable-sandbox --quiet` 通过（160 tests）。
@@ -34,6 +36,8 @@
   - `codesign --verify --deep --strict --verbose=2 /Applications/NexVoice.app` 通过。
   - `plutil -lint dist/NexVoice.app/Contents/Info.plist /Applications/NexVoice.app/Contents/Info.plist` 通过。
   - `dist/NexVoice.app` 和 `/Applications/NexVoice.app` 内的 `DeepSeek.json`、`TencentCloudASR.json` 嵌入配置存在且非空。
+  - `hdiutil verify dist/NexVoice-0.1.72-build73-speaking-glow-embedded-keys-20260702.dmg` 通过。
+  - 已挂载 DMG 验证根目录包含 `NexVoice.app` 和 `Applications` 快捷入口，且 DMG 内 App 签名通过、嵌入配置存在且非空。
 
 ## 本轮追加（2026-07-02：增强说话时矩阵波形亮度响应）
 
