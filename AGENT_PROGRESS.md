@@ -1,17 +1,60 @@
 # NexVoice 当前进展
 
-更新时间：2026-06-30
+更新时间：2026-07-02
 
 ## 当前状态
 
 - 当前工作目录：`/Users/nefish/Desktop/Coding/NexVoice`。
 - 项目形态：SwiftPM macOS 菜单栏 App，核心模块为 `NexVoiceCore`，宿主为 `NexVoiceHost`。
-- 默认入口：单击右 Alt 开始普通语音输入，再单击一次结束；双击右 Alt 进入上下文问答（优先选中文字，未选中文字则读取鼠标附近 OCR，且会高亮 OCR 覆盖区域）；长按右 Alt 约 0.55 秒进入看屏自动回复；ESC 可取消录音、等待 final、AI 改写或看屏回复中的会话。
+- 默认入口：单击右 Alt 开始普通语音输入，再单击一次结束；双击右 Alt 进入上下文问答（优先选中文字，未选中文字则读取鼠标附近 OCR，且会高亮 OCR 覆盖区域）；三击右 Alt 进入快捷指令快速翻译（优先处理选中文字，未选中文字则读取鼠标附近 OCR 并翻译）；长按右 Alt 约 0.55 秒进入看屏自动回复；ESC 可取消录音、等待 final、AI 改写或看屏回复中的会话。
 - 当前主链路：腾讯云实时 ASR `16k_zh_en` -> DeepSeek `deepseek-v4-flash` 最终整理 -> 写入当前聚焦输入框。
 - 普通语音输入已增加第一版“基于输入框短草稿连续改写”：录音开始时读取当前输入框草稿，语音结束后把“已有草稿 + 本轮语音”交给 DeepSeek 输出完整新草稿，并在安全条件满足时用非全选的 AX 写入替换当前输入框全文；空输入框、输入框内已有选区、超长草稿仍按光标位置普通插入。
 - 本地 SenseVoice Small 和 WhisperKit large-v3 保留为兜底和质量对照，不是当前默认主链路。
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
+
+## 本轮追加（2026-07-02：三击快捷指令支持鼠标 OCR 翻译）
+
+- 本轮结论：
+  - 问题原因已确认：三击快捷指令在上次修正后变成“无选中文字就快速失败”，没有复用双击的鼠标 OCR 捕获，所以鼠标指向文字后 三击会报“未检测到选中文本”。
+  - 已改为：三击先按原逻辑处理选中文字；如果没有选中文字且不是选区读取失败，就在鼠标附近跑 OCR，命中后直接按“快速翻译”处理并在鼠标附近展示结果。
+  - 如果系统暗示存在选区但剪贴板兜底仍读取失败，仍提示“未能读取选中文字”，避免误把失败选区切到 OCR。
+- 已执行：
+  - `Sources/NexVoiceHost/main.swift`：新增 `beginQuickShortcutMouseOCRTranslation`、`generateQuickShortcutOCRTranslation` 和 `finishQuickShortcutOCRWithError`，三击无选区分支改为 OCR 翻译。
+  - 新增日志事件：`begin_quick_shortcut_mouse_ocr`、`quick_shortcut_mouse_ocr_captured`、`quick_shortcut_mouse_ocr_generating`、`quick_shortcut_mouse_ocr_succeeded`、`quick_shortcut_mouse_ocr_failed`。
+  - 运行 `./scripts/bump_version.sh`，版本从 `0.1.65 (66)` 升到 `0.1.66 (67)`。
+  - 运行 `./scripts/build_app.sh release --embed-local-keys`，生成新的 `dist/NexVoice.app`。
+  - 已安装到 `/Applications/NexVoice.app`，旧版备份为 `dist/install-backups/NexVoice-20260702-000858-pre-quick-shortcut-ocr.app`。
+  - 已重启安装版 App，当前进程 PID `12171`。
+- 已验证：
+  - `swift build --disable-sandbox -c debug --product NexVoiceApp` 通过。
+  - `swift test --disable-sandbox --quiet` 通过（154 tests）。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=2 dist/NexVoice.app` 通过。
+  - `codesign --verify --deep --strict --verbose=2 /Applications/NexVoice.app` 通过。
+  - `plutil -lint dist/NexVoice.app/Contents/Info.plist /Applications/NexVoice.app/Contents/Info.plist` 通过。
+  - `dist/NexVoice.app` 和 `/Applications/NexVoice.app` 内的 `DeepSeek.json`、`TencentCloudASR.json` 嵌入配置存在且非空。
+
+## 本轮追加（2026-07-01：带 API 的分享 DMG 打包）
+
+- 本轮结论：
+  - 已重新构建带本机 API 配置的分享版 App，并生成可直接分发的 DMG。
+  - 当前分享包版本为 `0.1.65 (66)`，与仓库 `Info.plist`、`dist/NexVoice.app` 和 `/Applications/NexVoice.app` 一致。
+  - DMG 内已包含 `DeepSeek.json` 和 `TencentCloudASR.json` 嵌入配置，适合可信对象直接安装试用。
+- 已执行：
+  - 运行 `./scripts/bump_version.sh`，版本从 `0.1.64 (65)` 升到 `0.1.65 (66)`。
+  - 运行 `./scripts/build_app.sh release --embed-local-keys`，生成新的 `dist/NexVoice.app`。
+  - 用新包完整替换安装到 `/Applications/NexVoice.app`，旧版备份为 `dist/install-backups/NexVoice-20260701-233832.app`。
+  - 生成 DMG：`dist/NexVoice-0.1.65-build66-embedded-keys-20260701.dmg`。
+  - DMG SHA256：`541a52593f10786ffb27cb54bb28d07800e12fed9dee32e76bbe3c3e3ee24afe`。
+- 已验证：
+  - `codesign --verify --deep --strict --verbose=2 dist/NexVoice.app` 通过。
+  - `codesign --verify --deep --strict --verbose=2 /Applications/NexVoice.app` 通过。
+  - `plutil -lint dist/NexVoice.app/Contents/Info.plist /Applications/NexVoice.app/Contents/Info.plist` 通过。
+  - `dist/NexVoice.app/Contents/Resources/NexVoiceEmbeddedConfig/DeepSeek.json` 和 `TencentCloudASR.json` 存在且非空。
+  - `/Applications/NexVoice.app/Contents/Resources/NexVoiceEmbeddedConfig/DeepSeek.json` 和 `TencentCloudASR.json` 存在且非空。
+  - `hdiutil verify dist/NexVoice-0.1.65-build66-embedded-keys-20260701.dmg` 通过。
+  - 已挂载 DMG 验证根目录包含 `NexVoice.app` 和 `Applications` 快捷入口。
 
 ## 本轮追加（2026-06-30：三击快捷指令命中门槛修正）
 

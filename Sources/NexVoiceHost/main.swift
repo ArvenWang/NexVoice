@@ -599,28 +599,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        guard selectedTextDetection.shouldFallbackToMouseContext else {
+            logShortcutRoute(
+                event: "quick_shortcut_selected_text_read_failed",
+                routeAction: "beginQuickShortcutCommand",
+                interactionMode: ContextCaptureInteractionMode.quickShortcutCommand.rawValue,
+                selectedTextDetectionDurationMs: selectedTextDetectionDurationMs,
+                selectedTextDetectionSource: selectedTextDetection.source,
+                selectedTextDetectionFound: false,
+                selectedTextFocusedChainCount: selectedTextDetection.focusedChainCount,
+                selectedTextSearchRootCount: selectedTextDetection.searchRootCount,
+                selectedTextScannedNodeCount: selectedTextDetection.scannedNodeCount,
+                selectedTextDidUseRecursiveScan: selectedTextDetection.didUseRecursiveScan,
+                selectedTextDidSeeAXSelectionSignal: selectedTextDetection.didSeeAXSelectionSignal,
+                selectedTextShouldFallbackToMouseContext: selectedTextDetection.shouldFallbackToMouseContext,
+                selectedTextClipboardDurationMs: selectedTextDetection.clipboardDurationMs,
+                selectedTextClipboardDidChange: selectedTextDetection.clipboardDidChange,
+                selectedTextClipboardTextCharacters: selectedTextDetection.clipboardTextCharacters,
+                selectedTextClipboardRestoreSucceeded: selectedTextDetection.clipboardRestoreSucceeded,
+                errorMessage: "selected_text_read_failed"
+            )
+            captionPanel.showStatus("未能读取选中文字", isError: true, autoHideDelay: 1.4)
+            statusItem?.button?.title = "NexVoice"
+            isQuickShortcutCommandSession = false
+            refreshMenuState()
+            return
+        }
+
+        let shortcutAnchorRect = CGRect(origin: NSEvent.mouseLocation, size: .zero)
         logShortcutRoute(
-            event: "quick_shortcut_selected_text_not_found",
+            event: "begin_quick_shortcut_mouse_ocr",
             routeAction: "beginQuickShortcutCommand",
-            interactionMode: ContextCaptureInteractionMode.quickShortcutCommand.rawValue,
-            selectedTextDetectionDurationMs: selectedTextDetectionDurationMs,
-            selectedTextDetectionSource: selectedTextDetection.source,
-            selectedTextDetectionFound: false,
-            selectedTextFocusedChainCount: selectedTextDetection.focusedChainCount,
-            selectedTextSearchRootCount: selectedTextDetection.searchRootCount,
-            selectedTextScannedNodeCount: selectedTextDetection.scannedNodeCount,
-            selectedTextDidUseRecursiveScan: selectedTextDetection.didUseRecursiveScan,
-            selectedTextDidSeeAXSelectionSignal: selectedTextDetection.didSeeAXSelectionSignal,
-            selectedTextShouldFallbackToMouseContext: selectedTextDetection.shouldFallbackToMouseContext,
-            selectedTextClipboardDurationMs: selectedTextDetection.clipboardDurationMs,
-            selectedTextClipboardDidChange: selectedTextDetection.clipboardDidChange,
-            selectedTextClipboardTextCharacters: selectedTextDetection.clipboardTextCharacters,
-            selectedTextClipboardRestoreSucceeded: selectedTextDetection.clipboardRestoreSucceeded
+            interactionMode: ContextCaptureInteractionMode.quickShortcutCommand.rawValue
         )
-        captionPanel.showStatus("未检测到选中文本，请先选中文本后再三击", isError: true, autoHideDelay: 1.4)
-        statusItem?.button?.title = "NexVoice"
-        isQuickShortcutCommandSession = false
-        refreshMenuState()
+        beginQuickShortcutMouseOCRTranslation(
+            anchorRect: shortcutAnchorRect,
+            targetApplication: targetApplication
+        )
     }
 
     private func startQuickShortcutCommandRewrite(
@@ -671,6 +686,212 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
             }
         }
+    }
+
+    private func beginQuickShortcutMouseOCRTranslation(
+        anchorRect: CGRect,
+        targetApplication: NSRunningApplication?
+    ) {
+        let mouseLocation = anchorRect.origin
+
+        guard SystemPermissionRequester.hasScreenRecordingPermission else {
+            ScreenReplyContextCaptureService.requestScreenRecordingPermission()
+            captionPanel.showStatus("需要屏幕录制权限", isError: true, autoHideDelay: 1.6)
+            statusItem?.button?.title = "NexVoice 出错"
+            isQuickShortcutCommandSession = false
+            refreshMenuState()
+            return
+        }
+
+        contextQuestionAnchorRectForCurrentSession = anchorRect
+        contextQuestionCaptureIDForCurrentSession = UUID().uuidString
+        contextQuestionStartedAt = Date()
+        ocrRegionOverlay.show(region: preliminaryMouseOCRRegion(around: anchorRect))
+        captionPanel.showLoading("正在识别文字", anchorRect: anchorRect)
+        statusItem?.button?.title = "NexVoice OCR 翻译中"
+        refreshMenuState()
+
+        let overlayWindowNumber = ocrRegionOverlay.windowNumber
+        contextCaptureTask = Task { [weak self, targetApplication, mouseLocation, overlayWindowNumber] in
+            guard let self else { return }
+            let capturedContext: ScreenReplyCapturedContext
+            do {
+                capturedContext = try await self.mouseContextCaptureService.capture(
+                    mouseScreenLocation: mouseLocation,
+                    appName: targetApplication?.localizedName,
+                    bundleIdentifier: targetApplication?.bundleIdentifier,
+                    excludingWindowNumber: overlayWindowNumber,
+                    interactionMode: ContextCaptureInteractionMode.quickShortcutCommand.rawValue,
+                    successEventName: "quick_shortcut_mouse_ocr_captured",
+                    contextSource: "screen_region_ocr"
+                )
+                guard capturedContext.captureMode == .mouseRegion else {
+                    throw ScreenReplyCaptureError.noMouseRegionText
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                await MainActor.run {
+                    guard !self.isCurrentSessionCancelled else { return }
+                    self.finishQuickShortcutOCRWithError(error)
+                }
+                return
+            }
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                guard !self.isCurrentSessionCancelled,
+                      self.contextCaptureInteractionModeForCurrentSession == .quickShortcutCommand else { return }
+                self.screenReplyCapturedContextForCurrentSession = capturedContext
+                self.contextCaptureTask = nil
+                if let region = capturedContext.mouseRegionInScreen {
+                    self.ocrRegionOverlay.show(region: region)
+                }
+                self.generateQuickShortcutOCRTranslation(capturedContext: capturedContext)
+            }
+        }
+    }
+
+    private func generateQuickShortcutOCRTranslation(capturedContext: ScreenReplyCapturedContext) {
+        isRewritingCurrentSession = true
+        let answerAnchorRect = contextQuestionAnchorRectForCurrentSession
+            ?? capturedContext.mouseAnchorRectInScreen
+        captionPanel.showLoading("AI 处理中", anchorRect: answerAnchorRect)
+        statusItem?.button?.title = "NexVoice AI 处理中"
+        refreshMenuState()
+
+        let rewriteContext = rewriteContextForCurrentSession ?? VoiceRewriteContext(
+            sourceApplicationName: targetApplicationForCurrentSession?.localizedName,
+            sourceApplicationBundleIdentifier: targetApplicationForCurrentSession?.bundleIdentifier,
+            selectedTextMode: false,
+            personalDictionary: VoicePersonalDictionaryStore.load()
+        )
+        let outputLanguage = selectedOutputLanguage
+        let rewriteStyle = rewriteStyle(for: rewriteContext)
+        rewriteTask?.cancel()
+        rewriteTask = Task { [weak self] in
+            guard let self else { return }
+            await ScreenReplyDiagnosticsLogger.shared.log(
+                ScreenReplyDiagnosticEvent(
+                    captureID: capturedContext.captureID,
+                    event: "quick_shortcut_mouse_ocr_generating",
+                    interactionMode: ContextCaptureInteractionMode.quickShortcutCommand.rawValue,
+                    captureMode: capturedContext.captureMode,
+                    appName: capturedContext.appName,
+                    bundleIdentifier: capturedContext.bundleIdentifier,
+                    windowTitle: capturedContext.windowTitle,
+                    mouseLocation: capturedContext.mouseLocationInWindow,
+                    mouseRegion: capturedContext.mouseRegionInWindow,
+                    mouseRegionInScreen: capturedContext.mouseRegionInScreen,
+                    lineCount: capturedContext.lineCount,
+                    visibleText: capturedContext.visibleText,
+                    lines: capturedContext.lines,
+                    contextSource: "screen_region_ocr"
+                )
+            )
+
+            let translatedText: String
+            do {
+                translatedText = try await self.finalRewriteService.handleQuickShortcutCommand(
+                    sourceText: capturedContext.visibleText,
+                    command: self.voiceShortcutQuickCommand,
+                    outputLanguage: outputLanguage,
+                    style: rewriteStyle,
+                    context: rewriteContext
+                )
+            } catch is CancellationError {
+                return
+            } catch {
+                await ScreenReplyDiagnosticsLogger.shared.log(
+                    ScreenReplyDiagnosticEvent(
+                        captureID: capturedContext.captureID,
+                        event: "quick_shortcut_mouse_ocr_failed",
+                        interactionMode: ContextCaptureInteractionMode.quickShortcutCommand.rawValue,
+                        captureMode: capturedContext.captureMode,
+                        appName: capturedContext.appName,
+                        bundleIdentifier: capturedContext.bundleIdentifier,
+                        windowTitle: capturedContext.windowTitle,
+                        mouseLocation: capturedContext.mouseLocationInWindow,
+                        mouseRegion: capturedContext.mouseRegionInWindow,
+                        mouseRegionInScreen: capturedContext.mouseRegionInScreen,
+                        lineCount: capturedContext.lineCount,
+                        visibleText: capturedContext.visibleText,
+                        lines: capturedContext.lines,
+                        contextSource: "screen_region_ocr",
+                        errorMessage: error.localizedDescription
+                    )
+                )
+                await MainActor.run {
+                    guard !self.isCurrentSessionCancelled else { return }
+                    self.finishQuickShortcutOCRWithError(error)
+                }
+                return
+            }
+            guard !Task.isCancelled else { return }
+
+            await ScreenReplyDiagnosticsLogger.shared.log(
+                ScreenReplyDiagnosticEvent(
+                    captureID: capturedContext.captureID,
+                    event: "quick_shortcut_mouse_ocr_succeeded",
+                    interactionMode: ContextCaptureInteractionMode.quickShortcutCommand.rawValue,
+                    captureMode: capturedContext.captureMode,
+                    appName: capturedContext.appName,
+                    bundleIdentifier: capturedContext.bundleIdentifier,
+                    windowTitle: capturedContext.windowTitle,
+                    mouseLocation: capturedContext.mouseLocationInWindow,
+                    mouseRegion: capturedContext.mouseRegionInWindow,
+                    mouseRegionInScreen: capturedContext.mouseRegionInScreen,
+                    lineCount: capturedContext.lineCount,
+                    visibleText: capturedContext.visibleText,
+                    lines: capturedContext.lines,
+                    contextSource: "screen_region_ocr",
+                    reply: translatedText
+                )
+            )
+
+            await MainActor.run {
+                guard !self.isCurrentSessionCancelled else { return }
+                self.showContextualResult(translatedText, anchorRect: answerAnchorRect)
+            }
+        }
+    }
+
+    private func finishQuickShortcutOCRWithError(_ error: Error) {
+        isCurrentSessionCancelled = true
+        didInsertCurrentSession = true
+        isRewritingCurrentSession = false
+        isQuickShortcutCommandSession = false
+        selectedTextContextForCurrentSession = nil
+        rewriteContextForCurrentSession = nil
+        focusedDraftForCurrentSession = nil
+        focusedDraftReadMethodForCurrentSession = nil
+        focusedDraftIsTrustedForCurrentSession = false
+        hasEditableSelectionForCurrentSession = false
+        screenReplyCapturedContextForCurrentSession = nil
+        contextCaptureInteractionModeForCurrentSession = nil
+        contextQuestionCaptureIDForCurrentSession = nil
+        contextQuestionAnchorRectForCurrentSession = nil
+        contextQuestionStartedAt = nil
+        contextCaptureTask?.cancel()
+        contextCaptureTask = nil
+        rewriteTask?.cancel()
+        rewriteTask = nil
+        ocrRegionOverlay.hide()
+
+        let message: String
+        if case ScreenReplyCaptureError.screenRecordingPermissionRequired = error {
+            ScreenReplyContextCaptureService.requestScreenRecordingPermission()
+            message = "需要屏幕录制权限"
+        } else if case ScreenReplyCaptureError.noRecognizedText = error {
+            message = "未识别到文字"
+        } else if case ScreenReplyCaptureError.noMouseRegionText = error {
+            message = "未识别到鼠标附近文字"
+        } else {
+            message = "快捷翻译失败"
+        }
+        captionPanel.showStatus(message, isError: true, autoHideDelay: 1.6)
+        statusItem?.button?.title = "NexVoice 出错"
+        refreshMenuState()
     }
 
     private func beginContextQuestionAfterSelectionCapture() async {
