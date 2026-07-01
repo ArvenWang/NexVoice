@@ -13,6 +13,28 @@
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
+## 本轮追加（2026-07-02：降低默认亮度并增强说话中心扩散）
+
+- 本轮结论：
+  - 已按最新反馈压低默认/轻声状态亮度，把主要亮度对比留给说话时。
+  - 说话时中心像素会更快进入高亮，白紫色高光更强，并通过噪波控制的纺锥能量场向两侧扩散。
+  - 默认状态仍保留细碎流动噪波，但不会再提前接近满亮；两侧亮点继续保持稀疏，避免整条均匀发光。
+- 已执行：
+  - `VoiceWaveformDisplayPolicy`：改用更晚触发的音量响应曲线，新增弱环境噪波层，增强说话时中心能量和向外扩散的 spindle 区域，并提高侧边碎点门槛。
+  - `VoiceCaptionPanelController`：调整像素颜色映射，低强度像素更暗，高强度像素更接近明亮白紫色。
+  - `VoiceWaveformDisplayPolicyTests`：新增/更新测试覆盖轻声低亮度、说话中心显著变亮、亮区范围扩大、侧边碎点稀疏和默认噪波仍流动。
+  - 运行 `./scripts/bump_version.sh`，版本从 `0.1.71 (72)` 升到 `0.1.72 (73)`。
+  - 已构建并安装带 API 配置的 `/Applications/NexVoice.app`，旧版备份为 `dist/install-backups/NexVoice-20260702-021925-pre-waveform-speaking-glow.app`。
+  - 已重启安装版 App，当前进程 PID `88639`。
+- 已验证：
+  - `swift test --disable-sandbox --filter VoiceWaveformDisplayPolicyTests` 通过（15 tests）。
+  - `swift test --disable-sandbox --quiet` 通过（160 tests）。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=2 dist/NexVoice.app` 通过。
+  - `codesign --verify --deep --strict --verbose=2 /Applications/NexVoice.app` 通过。
+  - `plutil -lint dist/NexVoice.app/Contents/Info.plist /Applications/NexVoice.app/Contents/Info.plist` 通过。
+  - `dist/NexVoice.app` 和 `/Applications/NexVoice.app` 内的 `DeepSeek.json`、`TencentCloudASR.json` 嵌入配置存在且非空。
+
 ## 本轮追加（2026-07-02：增强说话时矩阵波形亮度响应）
 
 - 本轮结论：

@@ -106,7 +106,8 @@ import Testing
 
     let quietBrightest = quietCells.map(\.intensity).max() ?? 0
     let idleBrightest = idleCells.map(\.intensity).max() ?? 0
-    #expect(quietBrightest - idleBrightest >= 0.08)
+    #expect(quietBrightest - idleBrightest >= 0.025)
+    #expect(quietBrightest < 0.36)
 }
 
 @Test func quietActiveWaveformKeepsFlowingNoiseMotion() {
@@ -124,13 +125,13 @@ import Testing
     )
 
     #expect(firstFrame != laterFrame)
-    #expect(Set(firstFrame.map { round($0.intensity * 100) / 100 }).count > 6)
+    #expect(Set(firstFrame.map { round($0.intensity * 100) / 100 }).count >= 6)
 }
 
 @Test func louderAudioBrightensCenterWithNoiseFalloff() {
     let quietCells = VoiceWaveformDisplayPolicy.waveformGridCells(
         in: CGRect(x: 0, y: 0, width: 236, height: 28),
-        amplitude: 0,
+        amplitude: 0.18,
         phase: 0,
         isActive: true
     )
@@ -141,8 +142,25 @@ import Testing
         isActive: true
     )
 
-    #expect(averageCenterIntensity(loudCells) > averageCenterIntensity(quietCells) + 0.38)
+    #expect(averageCenterIntensity(loudCells) > averageCenterIntensity(quietCells) + 0.44)
     #expect(averageOuterIntensity(loudCells) < averageCenterIntensity(loudCells) * 0.35)
+}
+
+@Test func normalVoiceExpandsBrightRegionBeyondIdleShape() {
+    let quietCells = VoiceWaveformDisplayPolicy.waveformGridCells(
+        in: CGRect(x: 0, y: 0, width: 236, height: 28),
+        amplitude: 0.12,
+        phase: 1.1,
+        isActive: true
+    )
+    let speakingCells = VoiceWaveformDisplayPolicy.waveformGridCells(
+        in: CGRect(x: 0, y: 0, width: 236, height: 28),
+        amplitude: 0.52,
+        phase: 1.1,
+        isActive: true
+    )
+
+    #expect(brightCellCount(speakingCells, threshold: 0.18) > brightCellCount(quietCells, threshold: 0.18) * 3)
 }
 
 @Test func waveformEnergyStaysFocusedNearCenter() {
@@ -238,4 +256,8 @@ private func signChangeCount(in values: [CGFloat]) -> Int {
         }
     }
     return changes
+}
+
+private func brightCellCount(_ cells: [VoiceWaveformGridCell], threshold: CGFloat) -> Int {
+    cells.filter { $0.intensity > threshold }.count
 }

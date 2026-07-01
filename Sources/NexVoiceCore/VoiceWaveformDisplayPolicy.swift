@@ -75,8 +75,9 @@ public enum VoiceWaveformDisplayPolicy {
         let startY = bounds.midY - totalHeight / 2
         let centerColumn = CGFloat(gridColumnCount - 1) / 2
         let centerRow = CGFloat(gridRowCount - 1) / 2
-        let visualAmplitude = pow(clamp(amplitude, min: 0, max: 1), 0.48)
-        let voiceLevel = smoothstep(edge0: 0.08, edge1: 0.34, value: visualAmplitude)
+        let voiceInput = clamp(amplitude, min: 0, max: 1)
+        // 低音量阶段必须压住亮度，把主要对比留给正常说话时的中心爆亮。
+        let voiceLevel = smoothstep(edge0: 0.14, edge1: 0.56, value: voiceInput)
         let responseLevel = pow(voiceLevel, 0.58)
 
         return (0..<(gridColumnCount * gridRowCount)).map { index in
@@ -94,6 +95,7 @@ public enum VoiceWaveformDisplayPolicy {
             let spindleWidth = 0.18 + rowWeight * 0.58
             let spindle = exp(-pow(horizontalDistance / max(spindleWidth, 0.12), 2.35))
                 * rowWeight
+            let expandedSpindle = pow(spindle, 1.25 - responseLevel * 0.45)
             let centerCore = exp(-pow(horizontalDistance / 0.26, 2.1))
                 * (0.55 + rowWeight * 0.45)
 
@@ -103,17 +105,23 @@ public enum VoiceWaveformDisplayPolicy {
             let noise = clamp(noiseA * 0.36 + noiseB * 0.34 + noiseC * 0.30, min: 0, max: 1)
             let voiceWidth = 0.22 + responseLevel * 0.34
             let sparseNoise = smoothstep(
-                edge0: 0.61 - responseLevel * 0.31 - spindle * 0.15,
+                edge0: 0.61 - responseLevel * 0.31 - spindle * 0.15 + horizontalDistance * 0.10,
                 edge1: 0.96,
                 value: noise
             )
+            let ambientLevel = isActive
+                ? 0.018 + smoothstep(edge0: 0.04, edge1: 0.22, value: voiceInput) * 0.095
+                : 0
+            let ambientNoise = expandedSpindle
+                * ambientLevel
+                * (0.26 + noise * 0.74)
             let centerEnergy = centerCore
                 * responseLevel
-                * (0.34 + noise * 1.24)
-            let spindleEnergy = spindle
+                * (0.50 + noise * 1.42)
+            let spindleEnergy = expandedSpindle
                 * responseLevel
                 * sparseNoise
-                * (0.18 + voiceWidth + noise * 0.96)
+                * (0.24 + voiceWidth + noise * 1.08)
             let edgeSparkle = sparseNoise
                 * responseLevel
                 * (1 - centerCore)
@@ -121,7 +129,7 @@ public enum VoiceWaveformDisplayPolicy {
                 * (0.35 + noise * 0.65)
             let idleTrace = isActive ? max(0, noise - 0.94) * 0.010 : 0
             let intensity = clamp(
-                centerEnergy + spindleEnergy + edgeSparkle + idleTrace,
+                ambientNoise + centerEnergy + spindleEnergy + edgeSparkle + idleTrace,
                 min: 0,
                 max: 1
             )
