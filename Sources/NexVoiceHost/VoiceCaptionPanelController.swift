@@ -1094,7 +1094,7 @@ private final class VoiceWaveformView: NSView {
     func setActive(_ active: Bool) {
         guard isActive != active else { return }
         isActive = active
-        if active {
+        if active, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             startAnimation()
         } else {
             levelSmoother.reset()
@@ -1110,21 +1110,36 @@ private final class VoiceWaveformView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        let tint = NSColor(calibratedWhite: 0.94, alpha: isActive ? 0.96 : 0.36)
-        tint.setFill()
+        let trackRect = bounds.insetBy(dx: 1, dy: 2)
+        NSColor(calibratedWhite: 0.03, alpha: isActive ? 0.32 : 0.18).setFill()
+        NSBezierPath(roundedRect: trackRect, xRadius: trackRect.height / 2, yRadius: trackRect.height / 2).fill()
 
-        for rect in VoiceWaveformDisplayPolicy.waveBarRects(
+        let cells = VoiceWaveformDisplayPolicy.waveformGridCells(
             in: bounds,
             amplitude: amplitude,
-            phase: phase,
+            phase: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : phase,
             isActive: isActive
-        ) {
+        )
+        for cell in cells {
+            color(for: cell).setFill()
             NSBezierPath(
-                roundedRect: rect,
-                xRadius: rect.width / 2,
-                yRadius: rect.width / 2
+                roundedRect: cell.rect,
+                xRadius: 0.9,
+                yRadius: 0.9
             ).fill()
         }
+    }
+
+    private func color(for cell: VoiceWaveformGridCell) -> NSColor {
+        let centerBias = max(0, 1 - cell.distanceFromCenter)
+        let whiteMix = min(0.82, cell.intensity * 0.62 + centerBias * 0.22)
+        let red = 0.46 + whiteMix * 0.54
+        let green = 0.18 + whiteMix * 0.74
+        let blue = 0.78 + whiteMix * 0.22
+        let alpha = isActive
+            ? min(0.96, 0.10 + cell.intensity * 0.92)
+            : min(0.42, 0.04 + cell.intensity * 0.34)
+        return NSColor(calibratedRed: red, green: green, blue: blue, alpha: alpha)
     }
 
     private func startAnimation() {
@@ -1132,12 +1147,8 @@ private final class VoiceWaveformView: NSView {
         let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                if self.amplitude > 0 {
-                    self.phase += 0.12
-                    self.amplitude = max(0, self.amplitude * 0.96)
-                } else {
-                    self.phase = 0
-                }
+                self.phase += 0.105
+                self.amplitude = max(0, self.amplitude * 0.955)
                 self.needsDisplay = true
             }
         }

@@ -2,8 +2,8 @@ import CoreGraphics
 import Foundation
 
 public enum VoiceWaveformDisplayPolicy {
-    public static let waveformSize = CGSize(width: 64, height: 28)
-    public static let compactPanelSize = CGSize(width: 92, height: 56)
+    public static let waveformSize = CGSize(width: 236, height: 28)
+    public static let compactPanelSize = CGSize(width: 264, height: 56)
     public static let loadingPanelSize = CGSize(width: 156, height: 44)
     public static let statusPanelSize = CGSize(width: 188, height: 44)
     public static let expandedPanelWidth: CGFloat = 420
@@ -28,7 +28,8 @@ public enum VoiceWaveformDisplayPolicy {
     public static let panelRevealDuration: TimeInterval = 0.30
     public static let contentCrossfadeDuration: TimeInterval = 0.18
     public static let textFadeDuration: TimeInterval = 0.2
-    public static let wavePointCount = 5
+    public static let gridColumnCount = 44
+    public static let gridRowCount = 5
     public static let textContentWidth = expandedPanelWidth - horizontalPadding * 2
     public static let transcriptLayoutWidth = textContentWidth
         - transcriptTextInset * 2
@@ -60,38 +61,83 @@ public enum VoiceWaveformDisplayPolicy {
             + bottomPadding
     }
 
-    public static func waveBarRects(
+    public static func waveformGridCells(
         in bounds: CGRect,
         amplitude: CGFloat,
         phase: CGFloat,
         isActive: Bool
-    ) -> [CGRect] {
-        let dotWidth: CGFloat = 5
-        let minDotHeight: CGFloat = 4
-        let maxDotHeight: CGFloat = 18
-        let dotSpacing: CGFloat = 3
-        let totalWidth = CGFloat(wavePointCount) * dotWidth + CGFloat(wavePointCount - 1) * dotSpacing
+    ) -> [VoiceWaveformGridCell] {
+        let dotSize: CGFloat = 3.2
+        let dotSpacing: CGFloat = 1.8
+        let totalWidth = CGFloat(gridColumnCount) * dotSize + CGFloat(gridColumnCount - 1) * dotSpacing
+        let totalHeight = CGFloat(gridRowCount) * dotSize + CGFloat(gridRowCount - 1) * dotSpacing
         let startX = bounds.midX - totalWidth / 2
+        let startY = bounds.midY - totalHeight / 2
+        let centerColumn = CGFloat(gridColumnCount - 1) / 2
+        let centerRow = CGFloat(gridRowCount - 1) / 2
         let visualAmplitude = pow(clamp(amplitude, min: 0, max: 1), 0.55)
-        let activeLevel = isActive ? max(visualAmplitude, 0.14) : 0.06
+        let idleSignal: CGFloat = isActive ? 0.16 : 0.04
+        let signalWidth = clamp(idleSignal + visualAmplitude * 0.94, min: 0.08, max: 1)
 
-        return (0..<wavePointCount).map { index in
-            let wave = (sin(phase + CGFloat(index) * 0.78) + 1) / 2
-            let shapedLevel = clamp(activeLevel * (0.46 + wave * 0.78), min: 0, max: 1)
-            let dotHeight = minDotHeight + (maxDotHeight - minDotHeight) * shapedLevel
-            let centerX = startX
-                + dotWidth / 2
-                + CGFloat(index) * (dotWidth + dotSpacing)
-            return CGRect(
-                x: centerX - dotWidth / 2,
-                y: bounds.midY - dotHeight / 2,
-                width: dotWidth,
-                height: dotHeight
+        return (0..<(gridColumnCount * gridRowCount)).map { index in
+            let column = index % gridColumnCount
+            let row = index / gridColumnCount
+            let columnPosition = CGFloat(column)
+            let rowPosition = CGFloat(row)
+            let horizontalDistance = abs(columnPosition - centerColumn) / max(centerColumn, 1)
+            let verticalDistance = abs(rowPosition - centerRow) / max(centerRow, 1)
+
+            let voiceFalloff = exp(-pow(horizontalDistance / max(signalWidth, 0.08), 2.2))
+            let rowFalloff = 1 - verticalDistance * 0.34
+            let driftNoise = normalizedSine(
+                CGFloat(column) * 0.73
+                    + CGFloat(row) * 1.91
+                    + phase * 1.35
+                    + seededNoise(column: column, row: row) * 4.0
+            )
+            let shimmerNoise = normalizedSine(
+                CGFloat(column) * 1.37
+                    - CGFloat(row) * 0.61
+                    + phase * 2.4
+                    + seededNoise(column: row, row: column) * 5.7
+            )
+            let edgeNoise = max(0, shimmerNoise - 0.62) * (1 - voiceFalloff)
+            let voiceEnergy = voiceFalloff * (0.24 + visualAmplitude * 0.76)
+            let ambientEnergy = isActive ? (0.05 + driftNoise * 0.14) : 0.025
+            let intensity = clamp(
+                (ambientEnergy + voiceEnergy + edgeNoise * (0.12 + visualAmplitude * 0.16))
+                    * rowFalloff
+                    * (0.70 + driftNoise * 0.42),
+                min: isActive ? 0.025 : 0.012,
+                max: 1
+            )
+            let x = startX + columnPosition * (dotSize + dotSpacing)
+            let y = startY + rowPosition * (dotSize + dotSpacing)
+            return VoiceWaveformGridCell(
+                rect: CGRect(x: x, y: y, width: dotSize, height: dotSize),
+                intensity: intensity,
+                distanceFromCenter: horizontalDistance
             )
         }
     }
 }
 
+public struct VoiceWaveformGridCell: Equatable {
+    public let rect: CGRect
+    public let intensity: CGFloat
+    public let distanceFromCenter: CGFloat
+}
+
 private func clamp(_ value: CGFloat, min lowerBound: CGFloat, max upperBound: CGFloat) -> CGFloat {
     Swift.max(lowerBound, Swift.min(upperBound, value))
+}
+
+private func normalizedSine(_ value: CGFloat) -> CGFloat {
+    (sin(value) + 1) / 2
+}
+
+private func seededNoise(column: Int, row: Int) -> CGFloat {
+    let mixed = (column &* 73_856_093) ^ (row &* 19_349_663)
+    let positive = abs(mixed % 10_000)
+    return CGFloat(positive) / 10_000
 }

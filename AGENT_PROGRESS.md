@@ -13,6 +13,29 @@
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
+## 本轮追加（2026-07-02：长矩阵噪波语音波形）
+
+- 本轮结论：
+  - 已把原来的 5 根短波形替换为更长的方块矩阵波形，视觉方向接近“中心向两侧扩散的噪波信号条”。
+  - 新波形不是完全跟随音量：静音时仍有低强度流动噪波；说话时在基础噪波上叠加音量扩散，亮区从中心向两边延展。
+  - 方块亮度带有稳定伪随机变化，不是每帧真随机，避免视觉闪烁和性能浪费。
+  - 如果系统开启“减少动态效果”，波形会保留音量反馈，但不再持续自动流动。
+- 已执行：
+  - `VoiceWaveformDisplayPolicy`：波形尺寸从 `64x28` 调整为 `236x28`，compact 面板从 `92x56` 调整为 `264x56`；新增 44 列 x 5 行网格单元计算。
+  - `VoiceCaptionPanelController`：`VoiceWaveformView` 改为绘制暗色轨道 + 方块矩阵；每个方块按中心距离、音量和噪波相位计算紫色/白色亮度层次。
+  - `VoiceWaveformDisplayPolicyTests`：更新为验证长网格、亮度噪波、静音流动、音量向外扩散和隐藏策略。
+  - 运行 `./scripts/bump_version.sh`，版本从 `0.1.66 (67)` 升到 `0.1.67 (68)`。
+  - 已构建并安装带 API 配置的 `/Applications/NexVoice.app`，旧版备份为 `dist/install-backups/NexVoice-20260702-014510-pre-noise-grid-waveform.app`。
+  - 已重启安装版 App，当前进程 PID `11088`。
+- 已验证：
+  - `swift test --disable-sandbox --filter VoiceWaveformDisplayPolicyTests` 通过（10 tests）。
+  - `swift test --disable-sandbox --quiet` 通过（155 tests）。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=2 dist/NexVoice.app` 通过。
+  - `codesign --verify --deep --strict --verbose=2 /Applications/NexVoice.app` 通过。
+  - `plutil -lint dist/NexVoice.app/Contents/Info.plist /Applications/NexVoice.app/Contents/Info.plist` 通过。
+  - `dist/NexVoice.app` 和 `/Applications/NexVoice.app` 内的 `DeepSeek.json`、`TencentCloudASR.json` 嵌入配置存在且非空。
+
 ## 本轮追加（2026-07-02：三击快捷指令支持鼠标 OCR 翻译）
 
 - 本轮结论：
