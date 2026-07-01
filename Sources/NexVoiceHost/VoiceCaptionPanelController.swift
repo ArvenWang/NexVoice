@@ -1110,9 +1110,6 @@ private final class VoiceWaveformView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        let trackRect = bounds.insetBy(dx: 1, dy: 2)
-        NSColor(calibratedWhite: 0.03, alpha: isActive ? 0.32 : 0.18).setFill()
-        NSBezierPath(roundedRect: trackRect, xRadius: trackRect.height / 2, yRadius: trackRect.height / 2).fill()
 
         let cells = VoiceWaveformDisplayPolicy.waveformGridCells(
             in: bounds,
@@ -1136,9 +1133,10 @@ private final class VoiceWaveformView: NSView {
         let red = 0.46 + whiteMix * 0.54
         let green = 0.18 + whiteMix * 0.74
         let blue = 0.78 + whiteMix * 0.22
+        let edgeFade = pow(max(0, 1 - cell.distanceFromCenter), 1.35)
         let alpha = isActive
-            ? min(0.96, 0.10 + cell.intensity * 0.92)
-            : min(0.42, 0.04 + cell.intensity * 0.34)
+            ? min(0.96, cell.intensity * (0.34 + edgeFade * 0.82))
+            : min(0.34, cell.intensity * (0.18 + edgeFade * 0.32))
         return NSColor(calibratedRed: red, green: green, blue: blue, alpha: alpha)
     }
 

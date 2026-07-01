@@ -13,6 +13,27 @@
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
+## 本轮追加（2026-07-02：矩阵波形边缘渐隐与中心聚焦修正）
+
+- 本轮结论：
+  - 已按用户截图反馈修正：去掉矩阵波形内部黑色底条；两侧方块现在按距离自然渐隐；发光更集中在中央，音量扩散从中心向两边的感觉更明显。
+  - 静音时仍保留低强度流动噪波，但底噪也会受边缘衰减控制，不会在两端形成硬边。
+- 已执行：
+  - `VoiceWaveformDisplayPolicy`：收窄音量扩散宽度，增强中心峰值衰减曲线，边缘噪波和环境噪波都乘以横向 fade。
+  - `VoiceCaptionPanelController`：删除额外暗色 track 绘制；方块 alpha 进一步按中心距离衰减。
+  - `VoiceWaveformDisplayPolicyTests`：新增中心聚焦和边缘渐隐断言，防止后续回到整条均匀发光。
+  - 运行 `./scripts/bump_version.sh`，版本从 `0.1.67 (68)` 升到 `0.1.68 (69)`。
+  - 已构建并安装带 API 配置的 `/Applications/NexVoice.app`，旧版备份为 `dist/install-backups/NexVoice-20260702-015012-pre-waveform-fade-focus.app`。
+  - 已重启安装版 App，当前进程 PID `38297`。
+- 已验证：
+  - `swift test --disable-sandbox --filter VoiceWaveformDisplayPolicyTests` 通过（12 tests）。
+  - `swift test --disable-sandbox --quiet` 通过（157 tests）。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=2 dist/NexVoice.app` 通过。
+  - `codesign --verify --deep --strict --verbose=2 /Applications/NexVoice.app` 通过。
+  - `plutil -lint dist/NexVoice.app/Contents/Info.plist /Applications/NexVoice.app/Contents/Info.plist` 通过。
+  - `dist/NexVoice.app` 和 `/Applications/NexVoice.app` 内的 `DeepSeek.json`、`TencentCloudASR.json` 嵌入配置存在且非空。
+
 ## 本轮追加（2026-07-02：长矩阵噪波语音波形）
 
 - 本轮结论：

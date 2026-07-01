@@ -76,8 +76,8 @@ public enum VoiceWaveformDisplayPolicy {
         let centerColumn = CGFloat(gridColumnCount - 1) / 2
         let centerRow = CGFloat(gridRowCount - 1) / 2
         let visualAmplitude = pow(clamp(amplitude, min: 0, max: 1), 0.55)
-        let idleSignal: CGFloat = isActive ? 0.16 : 0.04
-        let signalWidth = clamp(idleSignal + visualAmplitude * 0.94, min: 0.08, max: 1)
+        let idleSignal: CGFloat = isActive ? 0.10 : 0.035
+        let signalWidth = clamp(idleSignal + visualAmplitude * 0.56, min: 0.06, max: 0.62)
 
         return (0..<(gridColumnCount * gridRowCount)).map { index in
             let column = index % gridColumnCount
@@ -87,8 +87,10 @@ public enum VoiceWaveformDisplayPolicy {
             let horizontalDistance = abs(columnPosition - centerColumn) / max(centerColumn, 1)
             let verticalDistance = abs(rowPosition - centerRow) / max(centerRow, 1)
 
-            let voiceFalloff = exp(-pow(horizontalDistance / max(signalWidth, 0.08), 2.2))
-            let rowFalloff = 1 - verticalDistance * 0.34
+            let voiceFalloff = exp(-pow(horizontalDistance / max(signalWidth, 0.06), 3.35))
+            let centerGlow = exp(-pow(horizontalDistance / 0.38, 2.4))
+            let edgeFade = pow(clamp(1 - horizontalDistance, min: 0, max: 1), 2.6)
+            let rowFalloff = 1 - verticalDistance * 0.38
             let driftNoise = normalizedSine(
                 CGFloat(column) * 0.73
                     + CGFloat(row) * 1.91
@@ -101,14 +103,15 @@ public enum VoiceWaveformDisplayPolicy {
                     + phase * 2.4
                     + seededNoise(column: row, row: column) * 5.7
             )
-            let edgeNoise = max(0, shimmerNoise - 0.62) * (1 - voiceFalloff)
-            let voiceEnergy = voiceFalloff * (0.24 + visualAmplitude * 0.76)
-            let ambientEnergy = isActive ? (0.05 + driftNoise * 0.14) : 0.025
+            let edgeNoise = max(0, shimmerNoise - 0.76) * (1 - voiceFalloff) * edgeFade
+            let voiceEnergy = voiceFalloff * (0.34 + visualAmplitude * 0.88)
+            let ambientEnergy = (isActive ? (0.018 + driftNoise * 0.075) : 0.012)
+                * max(edgeFade, centerGlow * 0.72)
             let intensity = clamp(
                 (ambientEnergy + voiceEnergy + edgeNoise * (0.12 + visualAmplitude * 0.16))
                     * rowFalloff
-                    * (0.70 + driftNoise * 0.42),
-                min: isActive ? 0.025 : 0.012,
+                    * (0.76 + driftNoise * 0.34),
+                min: 0,
                 max: 1
             )
             let x = startX + columnPosition * (dotSize + dotSpacing)

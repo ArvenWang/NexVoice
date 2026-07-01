@@ -145,8 +145,37 @@ import Testing
     #expect(loudOuterAverage > quietOuterAverage * 2)
 }
 
+@Test func waveformEnergyStaysFocusedNearCenter() {
+    let cells = VoiceWaveformDisplayPolicy.waveformGridCells(
+        in: CGRect(x: 0, y: 0, width: 236, height: 28),
+        amplitude: 0.34,
+        phase: 1.2,
+        isActive: true
+    )
+
+    #expect(averageCenterIntensity(cells) > averageOuterIntensity(cells) * 4)
+}
+
+@Test func waveformEdgesFadeOutNaturally() {
+    let cells = VoiceWaveformDisplayPolicy.waveformGridCells(
+        in: CGRect(x: 0, y: 0, width: 236, height: 28),
+        amplitude: 0.62,
+        phase: 0.8,
+        isActive: true
+    )
+
+    let edgeCells = cells.filter { $0.distanceFromCenter > 0.92 }
+    #expect((edgeCells.map(\.intensity).max() ?? 1) < 0.04)
+}
+
 @Test func waveformFeedbackHidesImmediatelyAfterInsertion() {
     #expect(VoiceWaveformDisplayPolicy.insertedTextHideDelay == 0)
+}
+
+private func averageCenterIntensity(_ cells: [VoiceWaveformGridCell]) -> CGFloat {
+    let centerCells = cells.filter { $0.distanceFromCenter < 0.20 }
+    let total = centerCells.reduce(CGFloat(0)) { $0 + $1.intensity }
+    return total / CGFloat(max(centerCells.count, 1))
 }
 
 private func averageOuterIntensity(_ cells: [VoiceWaveformGridCell]) -> CGFloat {
