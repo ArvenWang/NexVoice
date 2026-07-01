@@ -90,6 +90,25 @@ import Testing
     #expect((activeCells.map(\.intensity).max() ?? 1) < 0.04)
 }
 
+@Test func silentActiveWaveformAvoidsStrobeDropouts() {
+    let firstFrame = VoiceWaveformDisplayPolicy.waveformGridCells(
+        in: CGRect(x: 0, y: 0, width: 236, height: 28),
+        amplitude: 0,
+        phase: 0,
+        isActive: true
+    )
+    let nextFrame = VoiceWaveformDisplayPolicy.waveformGridCells(
+        in: CGRect(x: 0, y: 0, width: 236, height: 28),
+        amplitude: 0,
+        phase: 0.030,
+        isActive: true
+    )
+
+    #expect(totalIntensity(nextFrame) > totalIntensity(firstFrame) * 0.94)
+    #expect(totalIntensity(nextFrame) < totalIntensity(firstFrame) * 1.06)
+    #expect((firstFrame.map(\.intensity).max() ?? 1) < 0.04)
+}
+
 @Test func quietAudioCreatesVisibleWaveMovement() {
     let quietCells = VoiceWaveformDisplayPolicy.waveformGridCells(
         in: CGRect(x: 0, y: 0, width: 236, height: 28),
@@ -260,4 +279,8 @@ private func signChangeCount(in values: [CGFloat]) -> Int {
 
 private func brightCellCount(_ cells: [VoiceWaveformGridCell], threshold: CGFloat) -> Int {
     cells.filter { $0.intensity > threshold }.count
+}
+
+private func totalIntensity(_ cells: [VoiceWaveformGridCell]) -> CGFloat {
+    cells.reduce(CGFloat(0)) { $0 + $1.intensity }
 }

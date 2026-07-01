@@ -114,7 +114,7 @@ public enum VoiceWaveformDisplayPolicy {
                 : 0
             let ambientNoise = expandedSpindle
                 * ambientLevel
-                * (0.26 + noise * 0.74)
+                * (0.58 + noise * 0.42)
             let centerEnergy = centerCore
                 * responseLevel
                 * (0.50 + noise * 1.42)
