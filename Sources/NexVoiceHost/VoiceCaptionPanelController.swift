@@ -1129,8 +1129,8 @@ private final class VoiceWaveformView: NSView {
 
     private func color(for cell: VoiceWaveformGridCell) -> NSColor {
         let whiteMix = min(0.96, pow(max(0, cell.intensity), 0.74) * 1.08)
-        let red = 0.07 + whiteMix * 0.68
-        let green = 0.43 + whiteMix * 0.45
+        let red = 0.31 + whiteMix * 0.46
+        let green = 0.09 + whiteMix * 0.48
         let blue = 1.00
         let alpha = isActive
             ? min(0.99, pow(max(0, cell.intensity), 0.92) * 1.16)
@@ -1143,7 +1143,7 @@ private final class VoiceWaveformView: NSView {
         let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                self.phase += 0.030 + min(0.24, self.amplitude * 0.26)
+                self.phase += 0.018 + min(0.25, self.amplitude * 0.28)
                 self.amplitude = max(0, self.amplitude * 0.955)
                 self.needsDisplay = true
             }

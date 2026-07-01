@@ -109,6 +109,30 @@ import Testing
     #expect((firstFrame.map(\.intensity).max() ?? 1) < 0.04)
 }
 
+@Test func silentActiveWaveformKeepsIndividualPixelsStable() {
+    let frames = (0..<60).map { frame in
+        VoiceWaveformDisplayPolicy.waveformGridCells(
+            in: CGRect(x: 0, y: 0, width: 236, height: 28),
+            amplitude: 0,
+            phase: CGFloat(frame) * 0.018,
+            isActive: true
+        )
+    }
+    let cellCount = frames.first?.count ?? 0
+    let stableVisibleCells = (0..<cellCount).filter { index in
+        let values = frames.map { $0[index].intensity }
+        let maximum = values.max() ?? 0
+        let minimum = values.min() ?? 0
+        return maximum > 0.006 && minimum > maximum * 0.68
+    }
+    let visibleCells = (0..<cellCount).filter { index in
+        frames.map { $0[index].intensity }.max() ?? 0 > 0.006
+    }
+
+    #expect(stableVisibleCells.count == visibleCells.count)
+    #expect(visibleCells.count < cellCount)
+}
+
 @Test func quietAudioCreatesVisibleWaveMovement() {
     let quietCells = VoiceWaveformDisplayPolicy.waveformGridCells(
         in: CGRect(x: 0, y: 0, width: 236, height: 28),

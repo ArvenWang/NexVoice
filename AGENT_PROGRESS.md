@@ -13,6 +13,32 @@
 - 打包脚本：`./scripts/build_app.sh release --embed-local-keys` 可生成带本机 DeepSeek / 腾讯云 ASR 配置的私用 App 包。
 - 版本号规则：当前版本从 `0.1.0 / build 1` 开始纳入自动化管理；每次 Git 提交包含真实迭代内容时，pre-commit hook 会自动把 patch 版本递增 `0.0.1`，并把 build 号递增 `1`。
 
+## 本轮追加（2026-07-02：蓝紫色波形与静音单像素防频闪）
+
+- 本轮结论：
+  - 已把波形从偏青的蓝色系改为以 `#4E18FF` 为基准的蓝紫色系，亮部过渡到淡蓝紫，整体更偏科技蓝紫。
+  - 静音状态不再使用偶发高噪波闪点；保留低不透明度的局部纺锥底，并只叠加小幅噪波运动，避免单个像素忽然接近消失。
+  - 静音时不会把全部格子打开：采样显示 220 个格子中约 119 个达到可见阈值，仍保留自然渐隐和局部噪波。
+- 已执行：
+  - `VoiceWaveformDisplayPolicy`：移除静音 `idleTrace` 偶发闪点，把静音 ambient noise 从大幅波动改成稳定底值 + 小幅扰动。
+  - `VoiceCaptionPanelController`：颜色映射改成蓝紫基准；静音 phase 基础速度继续降低，说话时仍随音量加速。
+  - `VoiceWaveformDisplayPolicyTests`：新增 `silentActiveWaveformKeepsIndividualPixelsStable`，约束静音可见像素在 60 帧内不能明显掉到快消失，同时确认不是所有像素都可见。
+  - 运行 `./scripts/bump_version.sh`，版本从 `0.1.73 (74)` 升到 `0.1.74 (75)`。
+  - 已构建并安装带 API 配置的 `/Applications/NexVoice.app`，旧版备份为 `dist/install-backups/NexVoice-20260702-023407-pre-waveform-violet-stable-idle.app`。
+  - 已重启安装版 App，当前进程 PID `11903`。
+  - 已生成带 API 配置的分享 DMG：`dist/NexVoice-0.1.74-build75-violet-stable-idle-embedded-keys-20260702.dmg`。
+  - DMG SHA256：`e9e3d0f3d4a80961c591089157953a4900adab3807ec76b2d659c72fd03c1579`。
+- 已验证：
+  - `swift test --disable-sandbox --filter VoiceWaveformDisplayPolicyTests` 通过（17 tests）。
+  - `swift test --disable-sandbox --quiet` 通过（162 tests）。
+  - `./scripts/build_app.sh release --embed-local-keys` 通过。
+  - `codesign --verify --deep --strict --verbose=2 dist/NexVoice.app` 通过。
+  - `codesign --verify --deep --strict --verbose=2 /Applications/NexVoice.app` 通过。
+  - `plutil -lint dist/NexVoice.app/Contents/Info.plist /Applications/NexVoice.app/Contents/Info.plist` 通过。
+  - `dist/NexVoice.app` 和 `/Applications/NexVoice.app` 内的 `DeepSeek.json`、`TencentCloudASR.json` 嵌入配置存在且非空。
+  - `hdiutil verify dist/NexVoice-0.1.74-build75-violet-stable-idle-embedded-keys-20260702.dmg` 通过。
+  - 已挂载 DMG 验证根目录包含 `NexVoice.app` 和 `Applications` 快捷入口，且 DMG 内 App 签名通过、嵌入配置存在且非空。
+
 ## 本轮追加（2026-07-02：稳定静音波形频闪并改为蓝色系）
 
 - 本轮结论：

@@ -114,7 +114,7 @@ public enum VoiceWaveformDisplayPolicy {
                 : 0
             let ambientNoise = expandedSpindle
                 * ambientLevel
-                * (0.58 + noise * 0.42)
+                * (0.78 + noise * 0.22)
             let centerEnergy = centerCore
                 * responseLevel
                 * (0.50 + noise * 1.42)
@@ -127,9 +127,8 @@ public enum VoiceWaveformDisplayPolicy {
                 * (1 - centerCore)
                 * 0.10
                 * (0.35 + noise * 0.65)
-            let idleTrace = isActive ? max(0, noise - 0.94) * 0.010 : 0
             let intensity = clamp(
-                ambientNoise + centerEnergy + spindleEnergy + edgeSparkle + idleTrace,
+                ambientNoise + centerEnergy + spindleEnergy + edgeSparkle,
                 min: 0,
                 max: 1
             )
