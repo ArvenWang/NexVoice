@@ -109,18 +109,19 @@ public enum VoiceWaveformDisplayPolicy {
                 edge1: 0.96,
                 value: noise
             )
-            let ambientPresence = smoothstep(
-                edge0: 0.055,
-                edge1: 0.34,
-                value: expandedSpindle * (0.74 + seedC * 0.34)
+            let ambientGrain = smoothstep(
+                edge0: 0.28,
+                edge1: 0.74,
+                value: seedC + seedB * 0.16 + (1 - horizontalDistance) * 0.10 + rowWeight * 0.06
             )
+            let ambientEdge = 0.70 + (1 - horizontalDistance) * 0.20 + rowWeight * 0.10
+            let ambientPresence = ambientEdge * (0.08 + ambientGrain * 0.68 + noise * 0.24)
             let ambientLevel = isActive
-                ? 0.038 + smoothstep(edge0: 0.04, edge1: 0.22, value: voiceInput) * 0.080
+                ? 0.075 + smoothstep(edge0: 0.04, edge1: 0.22, value: voiceInput) * 0.040
                 : 0
             let ambientNoise = ambientPresence
                 * ambientLevel
-                * (1 - responseLevel * 0.62)
-                * (0.88 + noise * 0.12)
+                * (1 - responseLevel * 0.78)
             let centerEnergy = centerCore
                 * responseLevel
                 * (0.40 + noise * 1.14)
@@ -153,12 +154,12 @@ public enum VoiceWaveformDisplayPolicy {
     }
 
     public static func voiceResponseLevel(for amplitude: CGFloat) -> CGFloat {
-        smoothstep(edge0: 0.14, edge1: 0.56, value: clamp(amplitude, min: 0, max: 1))
+        smoothstep(edge0: 0.26, edge1: 0.62, value: clamp(amplitude, min: 0, max: 1))
     }
 
     public static func phaseIncrement(for amplitude: CGFloat) -> CGFloat {
         let level = voiceMotionLevel(for: amplitude)
-        return 0.006 + level * (0.030 + min(0.27, clamp(amplitude, min: 0, max: 1) * 0.30))
+        return 0.075 + level * (0.030 + min(0.27, clamp(amplitude, min: 0, max: 1) * 0.30))
     }
 }
 

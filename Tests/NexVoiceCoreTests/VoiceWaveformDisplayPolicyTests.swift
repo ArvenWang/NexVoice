@@ -87,7 +87,9 @@ import Testing
 
     #expect((idleCells.map(\.intensity).max() ?? 1) == 0)
     #expect((activeCells.map(\.intensity).max() ?? 0) > (idleCells.map(\.intensity).max() ?? 0))
-    #expect((activeCells.map(\.intensity).max() ?? 1) < 0.055)
+    #expect(brightCellCount(activeCells, threshold: 0.006) == activeCells.count)
+    #expect(brightCellCount(activeCells, threshold: 0.02) < activeCells.count)
+    #expect((activeCells.map(\.intensity).max() ?? 1) < 0.13)
 }
 
 @Test func silentActiveWaveformAvoidsStrobeDropouts() {
@@ -106,10 +108,11 @@ import Testing
 
     #expect(totalIntensity(nextFrame) > totalIntensity(firstFrame) * 0.94)
     #expect(totalIntensity(nextFrame) < totalIntensity(firstFrame) * 1.06)
-    #expect((firstFrame.map(\.intensity).max() ?? 1) < 0.055)
+    #expect(brightCellCount(firstFrame, threshold: 0.006) == firstFrame.count)
+    #expect((firstFrame.map(\.intensity).max() ?? 1) < 0.13)
 }
 
-@Test func silentActiveWaveformKeepsIndividualPixelsStable() {
+@Test func silentActiveWaveformKeepsVisibleNoiseStable() {
     let frames = (0..<60).map { frame in
         VoiceWaveformDisplayPolicy.waveformGridCells(
             in: CGRect(x: 0, y: 0, width: 236, height: 28),
@@ -119,18 +122,34 @@ import Testing
         )
     }
     let cellCount = frames.first?.count ?? 0
-    let stableVisibleCells = (0..<cellCount).filter { index in
-        let values = frames.map { $0[index].intensity }
-        let maximum = values.max() ?? 0
-        let minimum = values.min() ?? 0
-        return maximum > 0.006 && minimum > maximum * 0.68
-    }
     let visibleCells = (0..<cellCount).filter { index in
         frames.map { $0[index].intensity }.max() ?? 0 > 0.006
     }
 
-    #expect(stableVisibleCells.count == visibleCells.count)
-    #expect(visibleCells.count < cellCount)
+    #expect(visibleCells.count == cellCount)
+    #expect(frames.first?.contains { $0.intensity < 0.02 } == true)
+    #expect(totalIntensity(frames[30]) > totalIntensity(frames[0]) * 0.93)
+    #expect(totalIntensity(frames[30]) < totalIntensity(frames[0]) * 1.07)
+}
+
+@Test func silentActiveWaveformMovesEveryCell() {
+    let firstFrame = VoiceWaveformDisplayPolicy.waveformGridCells(
+        in: CGRect(x: 0, y: 0, width: 236, height: 28),
+        amplitude: 0,
+        phase: 0,
+        isActive: true
+    )
+    let laterFrame = VoiceWaveformDisplayPolicy.waveformGridCells(
+        in: CGRect(x: 0, y: 0, width: 236, height: 28),
+        amplitude: 0,
+        phase: 1.2,
+        isActive: true
+    )
+    let movingCellIndexes = firstFrame.indices.filter {
+        abs(firstFrame[$0].intensity - laterFrame[$0].intensity) > 0.0002
+    }
+
+    #expect(movingCellIndexes.count > firstFrame.count * 9 / 10)
 }
 
 @Test func waveformMotionKeepsIdleDriftBelowVoiceSpeed() {
@@ -138,10 +157,11 @@ import Testing
     #expect(VoiceWaveformDisplayPolicy.voiceMotionLevel(for: 0.18) == 0)
     #expect(VoiceWaveformDisplayPolicy.voiceMotionLevel(for: 0.34) > 0.10)
     #expect(VoiceWaveformDisplayPolicy.voiceMotionLevel(for: 0.62) == 1)
-    #expect(VoiceWaveformDisplayPolicy.voiceResponseLevel(for: 0.34) > VoiceWaveformDisplayPolicy.voiceMotionLevel(for: 0.34))
+    #expect(VoiceWaveformDisplayPolicy.voiceResponseLevel(for: 0.18) == 0)
+    #expect(VoiceWaveformDisplayPolicy.voiceResponseLevel(for: 0.34) < VoiceWaveformDisplayPolicy.voiceMotionLevel(for: 0.34))
     #expect(VoiceWaveformDisplayPolicy.phaseIncrement(for: 0) > 0)
     #expect(VoiceWaveformDisplayPolicy.phaseIncrement(for: 0.18) == VoiceWaveformDisplayPolicy.phaseIncrement(for: 0))
-    #expect(VoiceWaveformDisplayPolicy.phaseIncrement(for: 0.52) > VoiceWaveformDisplayPolicy.phaseIncrement(for: 0) * 20)
+    #expect(VoiceWaveformDisplayPolicy.phaseIncrement(for: 0.52) > VoiceWaveformDisplayPolicy.phaseIncrement(for: 0) * 2.8)
 }
 
 @Test func quietAudioCreatesVisibleWaveMovement() {
@@ -179,7 +199,7 @@ import Testing
     )
 
     #expect(firstFrame != laterFrame)
-    #expect(Set(firstFrame.map { round($0.intensity * 100) / 100 }).count >= 6)
+    #expect(Set(firstFrame.map { round($0.intensity * 100) / 100 }).count >= 5)
 }
 
 @Test func louderAudioBrightensCenterWithNoiseFalloff() {
