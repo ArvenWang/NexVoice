@@ -75,9 +75,7 @@ public enum VoiceWaveformDisplayPolicy {
         let startY = bounds.midY - totalHeight / 2
         let centerColumn = CGFloat(gridColumnCount - 1) / 2
         let centerRow = CGFloat(gridRowCount - 1) / 2
-        let visualAmplitude = pow(clamp(amplitude, min: 0, max: 1), 0.55)
-        let idleSignal: CGFloat = isActive ? 0.10 : 0.035
-        let signalWidth = clamp(idleSignal + visualAmplitude * 0.56, min: 0.06, max: 0.62)
+        let visualAmplitude = pow(clamp(amplitude, min: 0, max: 1), 0.62)
 
         return (0..<(gridColumnCount * gridRowCount)).map { index in
             let column = index % gridColumnCount
@@ -87,31 +85,26 @@ public enum VoiceWaveformDisplayPolicy {
             let horizontalDistance = abs(columnPosition - centerColumn) / max(centerColumn, 1)
             let verticalDistance = abs(rowPosition - centerRow) / max(centerRow, 1)
 
-            let voiceFalloff = exp(-pow(horizontalDistance / max(signalWidth, 0.06), 3.35))
-            let centerGlow = exp(-pow(horizontalDistance / 0.38, 2.4))
-            let edgeFade = pow(clamp(1 - horizontalDistance, min: 0, max: 1), 2.6)
-            let rowFalloff = 1 - verticalDistance * 0.38
-            let driftNoise = normalizedSine(
-                CGFloat(column) * 0.73
-                    + CGFloat(row) * 1.91
-                    + phase * 1.35
-                    + seededNoise(column: column, row: row) * 4.0
-            )
-            let shimmerNoise = normalizedSine(
-                CGFloat(column) * 1.37
-                    - CGFloat(row) * 0.61
-                    + phase * 2.4
-                    + seededNoise(column: row, row: column) * 5.7
-            )
-            let edgeNoise = max(0, shimmerNoise - 0.76) * (1 - voiceFalloff) * edgeFade
-            let voiceEnergy = voiceFalloff * (0.34 + visualAmplitude * 0.88)
-            let ambientEnergy = (isActive ? (0.018 + driftNoise * 0.075) : 0.012)
-                * max(edgeFade, centerGlow * 0.72)
+            let centerGlow = exp(-pow(horizontalDistance / 0.34, 2.15))
+            let rowFalloff = 1 - verticalDistance * 0.30
+            let seedA = seededNoise(column: column, row: row)
+            let seedB = seededNoise(column: row + 31, row: column + 17)
+            let seedC = seededNoise(column: column + 53, row: row + 89)
+            let noiseA = normalizedSine(phase * (0.75 + seedA * 1.85) + seedA * .pi * 2)
+            let noiseB = normalizedSine(phase * (1.45 + seedB * 2.10) + seedB * .pi * 2)
+            let noiseC = normalizedSine(phase * (2.65 + seedC * 1.35) + seedC * .pi * 2)
+            let noise = noiseA * 0.44 + noiseB * 0.36 + noiseC * 0.20
+            let baseEnergy = (isActive ? 0.060 : 0.040)
+                + noise * (isActive ? 0.055 : 0.020)
+            let centerEnergy = centerGlow
+                * (0.060 + visualAmplitude * 0.760)
+                * (0.70 + noise * 0.62)
+            let sparkleEnergy = pow(noise, 5.0)
+                * (0.030 + visualAmplitude * 0.145)
+                * (0.36 + centerGlow * 0.64)
             let intensity = clamp(
-                (ambientEnergy + voiceEnergy + edgeNoise * (0.12 + visualAmplitude * 0.16))
-                    * rowFalloff
-                    * (0.76 + driftNoise * 0.34),
-                min: 0,
+                (baseEnergy + centerEnergy + sparkleEnergy) * rowFalloff,
+                min: isActive ? 0.045 : 0.030,
                 max: 1
             )
             let x = startX + columnPosition * (dotSize + dotSpacing)
